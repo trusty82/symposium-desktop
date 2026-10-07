@@ -34,8 +34,9 @@ l'application), `lib.rs` (fenêtre, zone de notification, commandes). L'interfac
 
 ## Publier
 
-Pousser un tag `vX.Y.Z` (même version que `src-tauri/tauri.conf.json`) : le workflow **Windows**
-construit l'installeur `Symposium_X.Y.Z_x64-setup.exe` (artefact du workflow).
+Pousser un tag `vX.Y.Z` (même version que `src-tauri/tauri.conf.json` et `package.json`) : le
+workflow **Windows** construit l'installeur `Symposium_X.Y.Z_x64-setup.exe` et crée une
+**Release** GitHub avec l'installeur joint.
 
 L'installeur n'est pas signé : à la première installation, Windows SmartScreen affiche
 « Windows a protégé votre ordinateur » ; cliquer sur **Informations complémentaires** puis
