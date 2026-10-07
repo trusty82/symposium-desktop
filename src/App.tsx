@@ -1,3 +1,4 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -55,6 +56,8 @@ export default function App() {
     const [busy, setBusy] = useState(false);
     const [saved, setSaved] = useState(false);
     const [autostart, setAutostart] = useState(false);
+    const [version, setVersion] = useState('');
+    const [updateStatus, setUpdateStatus] = useState<string | null>(null);
 
     useEffect(() => {
         invoke<Settings>('get_settings').then((s) => {
@@ -64,6 +67,7 @@ export default function App() {
         });
         invoke<Candidate[]>('detect_saved_variables').then(setCandidates);
         isEnabled().then(setAutostart).catch(() => {});
+        getVersion().then(setVersion);
         // Envoi automatique (déconnexion du jeu) : l'état se met à jour.
         const unlisten = listen<SyncReport>('sync', (event) => setSettings((s) => (s ? { ...s, lastSync: event.payload } : s)));
         return () => {
@@ -107,6 +111,17 @@ export default function App() {
             if (report) setSettings((s) => (s ? { ...s, lastSync: report } : s));
         } finally {
             setBusy(false);
+        }
+    };
+
+    const checkUpdate = async () => {
+        setUpdateStatus('Recherche…');
+        try {
+            const found = await invoke<string | null>('check_update');
+            // Une mise à jour trouvée redémarre l'application : on n'arrive ici que si elle est à jour.
+            setUpdateStatus(found ? `Installation de la version ${found}…` : 'Symposium est à jour.');
+        } catch (e) {
+            setUpdateStatus(String(e));
         }
     };
 
@@ -247,6 +262,13 @@ export default function App() {
 
             <p className="footer dim">
                 Fermer cette fenêtre garde Symposium actif : son icône reste près de l’horloge. Clic droit dessus pour quitter.
+            </p>
+            <p className="footer dim">
+                Version {version} · mise à jour automatique ·{' '}
+                <button type="button" className="link" onClick={checkUpdate}>
+                    Rechercher une mise à jour
+                </button>
+                {updateStatus && <> · {updateStatus}</>}
             </p>
         </main>
     );

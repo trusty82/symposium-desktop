@@ -6,6 +6,7 @@ mod api;
 mod savedvars;
 mod settings;
 mod sync;
+mod update;
 
 use settings::Settings;
 use std::{path::PathBuf, sync::{Arc, Mutex}};
@@ -60,6 +61,12 @@ async fn sync_now(app: AppHandle, state: State<'_, Shared>, dir: State<'_, Confi
     tauri::async_runtime::spawn_blocking(move || sync::sync_once(&app, &state, &dir, true)).await.map_err(|e| e.to_string())
 }
 
+/// Recherche une mise à jour tout de suite ; l'installe s'il y en a une.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
+    update::check_and_install(&app).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -68,6 +75,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let state: Shared = Arc::new(Mutex::new(Settings::load(&dir)));
@@ -107,6 +115,7 @@ pub fn run() {
             }
 
             sync::watch(app.handle().clone(), state, dir);
+            update::watch(app.handle().clone());
             Ok(())
         })
         // Fermer la fenêtre la cache : la surveillance continue.
@@ -116,7 +125,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

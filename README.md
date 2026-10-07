@@ -11,6 +11,8 @@ Relie l'addon WoW: Forever **Symposium** au site de la guilde
   la fiche se met à jour toute seule.
 - Se connecte au site avec un **jeton personnel**, créé dans le profil (section
   « Application Symposium ») ; API `/api/desktop/…` du site.
+- Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
+  (`latest.json`, mises à jour signées).
 - Tourne dans la zone de notification (fermer la fenêtre la cache), peut se lancer au démarrage
   de Windows (en arrière-plan), une seule instance à la fois.
 
@@ -36,7 +38,12 @@ l'application), `lib.rs` (fenêtre, zone de notification, commandes). L'interfac
 
 Pousser un tag `vX.Y.Z` (même version que `src-tauri/tauri.conf.json` et `package.json`) : le
 workflow **Windows** construit l'installeur `Symposium_X.Y.Z_x64-setup.exe` et crée une
-**Release** GitHub avec l'installeur joint.
+**Release** GitHub avec l'installeur, sa signature et `latest.json` : les applications installées
+se mettent à jour d'elles-mêmes.
+
+Signature des mises à jour : clé privée dans les secrets du dépôt (`TAURI_SIGNING_PRIVATE_KEY`,
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`), clé publique dans `src-tauri/tauri.conf.json`. Sans la clé
+privée, plus aucune mise à jour ne peut être publiée : la garder en lieu sûr.
 
 L'installeur n'est pas signé : à la première installation, Windows SmartScreen affiche
 « Windows a protégé votre ordinateur » ; cliquer sur **Informations complémentaires** puis
