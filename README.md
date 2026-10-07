@@ -1,0 +1,42 @@
+# Symposium (application de bureau)
+
+Relie l'addon WoW: Forever **Symposium** au site de la guilde
+[symposium-gaming.com](https://symposium-gaming.com). Application [Tauri](https://tauri.app)
+(Rust + React), pour Windows.
+
+## Ce qu'elle fait
+
+- Surveille `WTF\Account\<compte>\SavedVariables\Symposium.lua` (écrit par l'addon à la
+  déconnexion ou au `/reload`) et envoie le dernier export du personnage (`/symposium`) au site :
+  la fiche se met à jour toute seule.
+- Se connecte au site avec un **jeton personnel**, créé dans le profil (section
+  « Application Symposium ») ; API `/api/desktop/…` du site.
+- Tourne dans la zone de notification (fermer la fenêtre la cache), peut se lancer au démarrage
+  de Windows (en arrière-plan), une seule instance à la fois.
+
+À venir : déposer le classement EPGP pour l'addon du maître du butin (demande une version bêta de
+l'addon).
+
+## Développer
+
+Prérequis : Node 22, Rust (`rustup`), et sur Windows les outils de
+[tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/).
+
+```bash
+npm install
+npm run tauri dev        # application en développement
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Le code Rust est dans `src-tauri/src` : `savedvars.rs` (fichier de l'addon), `api.rs` (site),
+`sync.rs` (surveillance et envoi), `settings.rs` (réglages, dans le dossier de configuration de
+l'application), `lib.rs` (fenêtre, zone de notification, commandes). L'interface est dans `src/`.
+
+## Publier
+
+Pousser un tag `vX.Y.Z` (même version que `src-tauri/tauri.conf.json`) : le workflow **Windows**
+construit l'installeur `Symposium_X.Y.Z_x64-setup.exe` (artefact du workflow).
+
+L'installeur n'est pas signé : à la première installation, Windows SmartScreen affiche
+« Windows a protégé votre ordinateur » ; cliquer sur **Informations complémentaires** puis
+**Exécuter quand même**.

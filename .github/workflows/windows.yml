@@ -1,0 +1,42 @@
+name: Windows
+
+# Construit l'installeur Windows (NSIS, sans certificat de signature) :
+# à chaque tag v* (ex. v0.1.0), ou à la demande (onglet Actions > Run workflow).
+# L'installeur est gardé comme artefact du workflow (« Symposium-Windows »).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Tests Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Installeur
+        run: npx tauri build --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Symposium-Windows
+          path: src-tauri/target/release/bundle/nsis/*.exe
