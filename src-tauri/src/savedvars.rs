@@ -14,7 +14,10 @@ pub struct LastExport {
 
 /// Dernier export du fichier, s'il y en a un.
 pub fn read_last_export(path: &Path) -> Result<Option<LastExport>, String> {
-    let raw = fs::read_to_string(path).map_err(|e| format!("Lecture de {} impossible : {e}", path.display()))?;
+    // Le jeu n'écrit pas toujours de l'UTF-8 valide (noms lus en jeu…) : lecture tolérante,
+    // le code de l'export n'utilise que des caractères ASCII.
+    let bytes = fs::read(path).map_err(|e| format!("Lecture de {} impossible : {e}", path.display()))?;
+    let raw = String::from_utf8_lossy(&bytes);
     let Some(start) = raw.find("[\"lastExport\"]") else { return Ok(None) };
     let block = &raw[start..];
     // Les clés à l'intérieur du JSON de l'export sont échappées (\"…\") : pas de confusion possible.
@@ -83,6 +86,19 @@ mod tests {
         let export = read_last_export(&file).unwrap().unwrap();
         assert_eq!(export.at, 1791290576);
         assert_eq!(export.code, "SYMP1:xV3b+/=");
+    }
+
+    #[test]
+    fn lit_un_fichier_qui_n_est_pas_en_utf8() {
+        let dir = std::env::temp_dir().join("symposium-desktop-test-latin1");
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Symposium.lua");
+        let mut bytes = b"SymposiumDB = {\n[\"names\"] = \"Pr\xeatre \xff\",\n[\"lastExport\"] = {\n[\"at\"] = 42,\n[\"code\"] = \"SYMP1:abc=\",\n},\n}\n".to_vec();
+        bytes.push(0xC3);
+        fs::write(&file, bytes).unwrap();
+        let export = read_last_export(&file).unwrap().unwrap();
+        assert_eq!(export.at, 42);
+        assert_eq!(export.code, "SYMP1:abc=");
     }
 
     #[test]
