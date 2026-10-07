@@ -173,7 +173,7 @@ export default function App() {
                 <img src={logo} alt="" className="logo" />
                 <div>
                     <h1>Symposium</h1>
-                    <p className="dim">Ta fiche sur le site, mise à jour toute seule à chaque déconnexion du jeu.</p>
+                    <p className="dim">Ta fiche sur le site, mise à jour toute seule quand tu quittes le jeu.</p>
                 </div>
             </header>
 
@@ -215,7 +215,7 @@ export default function App() {
                 <h2>
                     <span className="step">2</span> Le fichier de l’addon
                 </h2>
-                <p className="dim">L’addon Symposium y écrit ton export quand tu te déconnectes ou fais /reload.</p>
+                <p className="dim">L’addon Symposium y écrit ton personnage quand tu quittes le jeu ou fais /reload.</p>
                 {candidates.length > 0 ? (
                     <ul className="choices">
                         {candidates.map((c) => (
@@ -232,7 +232,7 @@ export default function App() {
                     </ul>
                 ) : (
                     <p className="warn">
-                        Aucun fichier trouvé automatiquement. Lance le jeu avec l’addon Symposium, tape /symposium, puis déconnecte-toi, ou indique le
+                        Aucun fichier trouvé automatiquement. Connecte-toi une fois en jeu avec l’addon Symposium, puis quitte le jeu, ou indique le
                         chemin à la main.
                     </p>
                 )}
@@ -242,7 +242,11 @@ export default function App() {
                         type="text"
                         value={path}
                         onChange={(e) => setPath(e.target.value)}
-                        placeholder="C:\Program Files (x86)\World of Warcraft\_classic_beta_\WTF\Account\…\SavedVariables\Symposium.lua"
+                        placeholder={
+                            navigator.userAgent.includes('Mac')
+                                ? '/Applications/World of Warcraft/_classic_beta_/WTF/Account/…/SavedVariables/Symposium.lua'
+                                : 'C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WTF\\Account\\…\\SavedVariables\\Symposium.lua'
+                        }
                         spellCheck={false}
                         aria-label="Chemin du fichier Symposium.lua"
                     />
@@ -283,7 +287,7 @@ export default function App() {
                         )}
                     </p>
                 ) : (
-                    <p className="dim">En attente : la fiche partira à ta prochaine déconnexion du jeu (ou /reload) après un /symposium.</p>
+                    <p className="dim">En attente : ta fiche partira la prochaine fois que tu quittes le jeu (ou fais /reload).</p>
                 )}
                 <div className="row">
                     <button type="button" className="ghost" onClick={syncNow} disabled={busy || !ready || !!dirty}>
@@ -327,7 +331,9 @@ export default function App() {
             </section>
 
             <p className="footer dim">
-                Fermer cette fenêtre garde Symposium actif : son icône reste près de l’horloge. Clic droit dessus pour quitter.
+                {navigator.userAgent.includes('Mac')
+                    ? 'Fermer cette fenêtre garde Symposium actif : son icône reste dans la barre des menus, en haut de l’écran. Clique dessus pour quitter.'
+                    : 'Fermer cette fenêtre garde Symposium actif : son icône reste près de l’horloge. Clic droit dessus pour quitter.'}
             </p>
             <p className="footer dim">
                 Version {version} · mise à jour automatique ·{' '}
