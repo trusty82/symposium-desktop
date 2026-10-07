@@ -18,25 +18,31 @@ pub fn sync_once(app: &AppHandle, state: &Shared, config_dir: &Path, force: bool
     if !settings.ready() { return None; }
 
     let report = match savedvars::read_last_export(Path::new(&settings.saved_variables)) {
-        Err(message) => SyncReport { at: now(), ok: false, message, character: None, url: None },
+        Err(message) => SyncReport { at: now(), ok: false, message, character: None, url: None, export_at: None },
         Ok(None) => {
             if !force { return None; }
-            SyncReport { at: now(), ok: false, message: "Pas encore d’export dans ce fichier : tape /symposium en jeu, puis déconnecte-toi ou fais /reload.".into(), character: None, url: None }
+            SyncReport { at: now(), ok: false, message: "Pas encore d’export dans ce fichier : tape /symposium en jeu, puis déconnecte-toi ou fais /reload.".into(), character: None, url: None, export_at: None }
         }
-        Ok(Some(export)) => {
-            if !force && settings.last_export_at == Some(export.at) { return None; }
-            match api::upload(&settings.site_url, &settings.token, &export.code) {
-                Ok(done) => {
-                    state.lock().unwrap().last_export_at = Some(export.at);
-                    SyncReport {
-                        at: now(), ok: true,
-                        message: format!("Fiche de {} {} sur le site.", done.name, if done.created { "créée" } else { "mise à jour" }),
-                        character: Some(done.name), url: Some(done.url),
-                    }
-                }
-                Err(message) => SyncReport { at: now(), ok: false, message, character: None, url: None },
+        Ok(Some(export)) if settings.last_export_at == Some(export.at) => {
+            if !force { return None; }
+            // Renvoyer le même export ne changerait rien à la fiche : on l'explique plutôt.
+            SyncReport {
+                at: now(), ok: false,
+                message: "C’est le même export qu’au dernier envoi : ta fiche est déjà à jour avec. Pour envoyer ton équipement actuel, tape /symposium en jeu puis /reload.".into(),
+                character: None, url: settings.last_sync.as_ref().and_then(|r| r.url.clone()), export_at: Some(export.at),
             }
         }
+        Ok(Some(export)) => match api::upload(&settings.site_url, &settings.token, &export.code) {
+            Ok(done) => {
+                state.lock().unwrap().last_export_at = Some(export.at);
+                SyncReport {
+                    at: now(), ok: true,
+                    message: format!("Fiche de {} {} sur le site.", done.name, if done.created { "créée" } else { "mise à jour" }),
+                    character: Some(done.name), url: Some(done.url), export_at: Some(export.at),
+                }
+            }
+            Err(message) => SyncReport { at: now(), ok: false, message, character: None, url: None, export_at: Some(export.at) },
+        },
     };
 
     {

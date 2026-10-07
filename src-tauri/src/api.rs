@@ -72,3 +72,10 @@ pub fn upload(site: &str, token: &str, code: &str) -> Result<Uploaded, String> {
     if !response.status().is_success() { return Err(error(response)); }
     response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
 }
+
+/// Zip de l'addon (version stable du site).
+pub fn download_addon(site: &str, token: &str) -> Result<Vec<u8>, String> {
+    let response = client().get(url(site, "/addon")).bearer_auth(token.trim()).send().map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.bytes().map(|b| b.to_vec()).map_err(|e| format!("Téléchargement de l’addon interrompu : {e}"))
+}

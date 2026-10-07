@@ -2,6 +2,7 @@
 //! Surveille SavedVariables\Symposium.lua et envoie la fiche du personnage au
 //! site à chaque déconnexion du jeu. Tourne dans la zone de notification.
 
+mod addon;
 mod api;
 mod savedvars;
 mod settings;
@@ -34,8 +35,9 @@ fn get_settings(state: State<'_, Shared>) -> Settings {
 }
 
 #[tauri::command]
-fn save_settings(token: String, saved_variables: String, site_url: Option<String>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
+fn save_settings(token: String, saved_variables: String, site_url: Option<String>, update_addon: Option<bool>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
     let mut s = state.lock().unwrap();
+    if let Some(update) = update_addon { s.update_addon = update; }
     if s.saved_variables != saved_variables { s.last_export_at = None; }
     s.token = token.trim().to_string();
     s.saved_variables = saved_variables.trim().to_string();
@@ -59,6 +61,24 @@ async fn test_connection(token: String, site_url: Option<String>, state: State<'
 async fn sync_now(app: AppHandle, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Option<settings::SyncReport>, String> {
     let (state, dir) = (state.inner().clone(), dir.0.clone());
     tauri::async_runtime::spawn_blocking(move || sync::sync_once(&app, &state, &dir, true)).await.map_err(|e| e.to_string())
+}
+
+/// Addon : dossier, version installée et version du site.
+#[tauri::command]
+async fn addon_status(state: State<'_, Shared>) -> Result<addon::AddonStatus, String> {
+    let settings = state.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let latest = if settings.token.is_empty() { None } else { api::me(&settings.site_url, &settings.token).ok().and_then(|m| m.addon_version) };
+        addon::status(&settings, latest)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Met l'addon à jour tout de suite (même si la mise à jour automatique est désactivée).
+#[tauri::command]
+async fn update_addon_now(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || update::update_addon(&app, true)).await.map_err(|e| e.to_string())?
 }
 
 /// Recherche une mise à jour tout de suite ; l'installe s'il y en a une.
@@ -125,7 +145,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

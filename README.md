@@ -11,6 +11,9 @@ Relie l'addon WoW: Forever **Symposium** au site de la guilde
   la fiche se met à jour toute seule.
 - Se connecte au site avec un **jeton personnel**, créé dans le profil (section
   « Application Symposium ») ; API `/api/desktop/…` du site.
+- Met à jour l'addon Symposium dans le dossier du jeu (version stable du site, désactivable) :
+  l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`).
+- Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).
 - Tourne dans la zone de notification (fermer la fenêtre la cache), peut se lancer au démarrage

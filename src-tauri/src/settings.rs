@@ -18,11 +18,13 @@ pub struct Settings {
     pub last_export_at: Option<i64>,
     /// Résultat du dernier envoi, affiché dans la fenêtre.
     pub last_sync: Option<SyncReport>,
+    /// Mettre à jour l'addon Symposium tout seul (version stable du site).
+    pub update_addon: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { site_url: DEFAULT_SITE.into(), token: String::new(), saved_variables: String::new(), last_export_at: None, last_sync: None }
+        Self { site_url: DEFAULT_SITE.into(), token: String::new(), saved_variables: String::new(), last_export_at: None, last_sync: None, update_addon: true }
     }
 }
 
@@ -35,6 +37,9 @@ pub struct SyncReport {
     pub message: String,
     pub character: Option<String>,
     pub url: Option<String>,
+    /// Horodatage de l'export du jeu concerné (secondes).
+    #[serde(default)]
+    pub export_at: Option<i64>,
 }
 
 impl Settings {

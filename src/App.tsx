@@ -13,6 +13,14 @@ interface SyncReport {
     message: string;
     character: string | null;
     url: string | null;
+    exportAt: number | null;
+}
+
+interface AddonStatus {
+    dir: string | null;
+    installed: string | null;
+    latest: string | null;
+    updateAvailable: boolean;
 }
 
 interface Settings {
@@ -21,6 +29,7 @@ interface Settings {
     savedVariables: string;
     lastExportAt: number | null;
     lastSync: SyncReport | null;
+    updateAddon: boolean;
 }
 
 interface Candidate {
@@ -58,6 +67,8 @@ export default function App() {
     const [autostart, setAutostart] = useState(false);
     const [version, setVersion] = useState('');
     const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+    const [addon, setAddon] = useState<AddonStatus | null>(null);
+    const [addonMessage, setAddonMessage] = useState<string | null>(null);
 
     useEffect(() => {
         invoke<Settings>('get_settings').then((s) => {
@@ -68,6 +79,7 @@ export default function App() {
         invoke<Candidate[]>('detect_saved_variables').then(setCandidates);
         isEnabled().then(setAutostart).catch(() => {});
         getVersion().then(setVersion);
+        invoke<AddonStatus>('addon_status').then(setAddon).catch(() => {});
         // Envoi automatique (déconnexion du jeu) : l'état se met à jour.
         const unlisten = listen<SyncReport>('sync', (event) => setSettings((s) => (s ? { ...s, lastSync: event.payload } : s)));
         return () => {
@@ -95,6 +107,7 @@ export default function App() {
         setError(null);
         try {
             setSettings(await invoke<Settings>('save_settings', { token, savedVariables: path }));
+            invoke<AddonStatus>('addon_status').then(setAddon).catch(() => {});
             setSaved(true);
             setTimeout(() => setSaved(false), 2500);
         } catch (e) {
@@ -123,6 +136,25 @@ export default function App() {
         } catch (e) {
             setUpdateStatus(String(e));
         }
+    };
+
+    const updateAddon = async () => {
+        setBusy(true);
+        setAddonMessage('Mise à jour…');
+        try {
+            const installed = await invoke<string | null>('update_addon_now');
+            setAddonMessage(installed ? `Addon mis à jour en ${installed} : fais /reload en jeu.` : 'L’addon est déjà à jour.');
+            setAddon(await invoke<AddonStatus>('addon_status'));
+        } catch (e) {
+            setAddonMessage(String(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const toggleAddonUpdates = async () => {
+        if (!settings) return;
+        setSettings(await invoke<Settings>('save_settings', { token: settings.token, savedVariables: settings.savedVariables, updateAddon: !settings.updateAddon }));
     };
 
     const toggleAutostart = async () => {
@@ -236,7 +268,11 @@ export default function App() {
                 ) : last ? (
                     <p className={last.ok ? 'ok' : 'error'}>
                         {last.ok ? '✓' : '⚠'} {last.message}
-                        <span className="dim small"> — {when(last.at)}</span>
+                        <span className="dim small">
+                            {' '}
+                            — {when(last.at)}
+                            {last.exportAt && ` · export du jeu du ${when(last.exportAt)}`}
+                        </span>
                         {last.url && (
                             <>
                                 {' '}
@@ -257,6 +293,36 @@ export default function App() {
                 <label className="check">
                     <input type="checkbox" checked={autostart} onChange={toggleAutostart} />
                     Lancer Symposium au démarrage de l’ordinateur
+                </label>
+            </section>
+
+            <section className="card">
+                <h2>
+                    <span className="step">4</span> L’addon
+                </h2>
+                {!addon?.dir ? (
+                    <p className="dim">Choisis d’abord ton fichier Symposium.lua : l’application en déduit le dossier de l’addon.</p>
+                ) : (
+                    <p>
+                        Installé : <strong>{addon.installed ?? 'aucun'}</strong>
+                        {addon.latest && (
+                            <>
+                                {' '}
+                                · sur le site : <strong>{addon.latest}</strong>
+                            </>
+                        )}
+                        {addon.updateAvailable ? <span className="warn"> · mise à jour disponible</span> : addon.installed && <span className="ok"> · à jour</span>}
+                    </p>
+                )}
+                {addonMessage && <p className="dim small">{addonMessage}</p>}
+                <div className="row">
+                    <button type="button" className="ghost" onClick={updateAddon} disabled={busy || !ready || !addon?.updateAvailable}>
+                        Mettre à jour l’addon maintenant
+                    </button>
+                </div>
+                <label className="check">
+                    <input type="checkbox" checked={settings?.updateAddon ?? true} onChange={toggleAddonUpdates} disabled={!settings} />
+                    Mettre l’addon à jour automatiquement (version stable du site)
                 </label>
             </section>
 

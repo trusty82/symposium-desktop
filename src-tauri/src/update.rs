@@ -3,8 +3,9 @@
 //! et redémarre. Les mises à jour sont signées : une version non signée par la
 //! clé du projet est refusée.
 
+use crate::{addon, api, sync::Shared};
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -28,12 +29,31 @@ pub async fn check_and_install(app: &AppHandle) -> Result<Option<String>, String
     app.restart();
 }
 
-/// Vérifie au démarrage (après 30 secondes), puis toutes les 6 heures.
+/// Met l'addon à jour s'il y a plus récent sur le site. Renvoie la version installée, s'il y en a eu une.
+pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, String> {
+    let settings = app.state::<Shared>().lock().unwrap().clone();
+    if !settings.ready() || (!force && !settings.update_addon) { return Ok(None); }
+    let latest = api::me(&settings.site_url, &settings.token)?.addon_version;
+    if !addon::status(&settings, latest).update_available { return Ok(None); }
+    let version = addon::install(&settings)?;
+    let _ = app
+        .notification()
+        .builder()
+        .title("Symposium")
+        .body(format!("Addon Symposium mis à jour en {version} : fais /reload en jeu (ou reconnecte-toi)."))
+        .show();
+    Ok(Some(version))
+}
+
+/// Vérifie au démarrage (après 30 secondes), puis toutes les 6 heures : l'application, puis l'addon.
 pub fn watch(app: AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(30));
         loop {
             if let Err(e) = tauri::async_runtime::block_on(check_and_install(&app)) {
+                eprintln!("{e}");
+            }
+            if let Err(e) = update_addon(&app, false) {
                 eprintln!("{e}");
             }
             std::thread::sleep(EVERY);
