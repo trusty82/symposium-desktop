@@ -1,0 +1,116 @@
+name: Release
+
+# Construit l'application pour Windows (installeur NSIS) et Mac (universelle :
+# Apple Silicon et Intel, .dmg), sans certificat de signature :
+# - à chaque tag v* (ex. v0.4.0) : Release GitHub avec les installeurs et latest.json
+#   (mise à jour automatique des applications installées, Windows et Mac) ;
+# - à la demande (onglet Actions > Run workflow) : installeurs gardés comme artefacts.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Tests Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Installeur
+        run: npx tauri build --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Application universelle (Apple Silicon et Intel)
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+      - name: Noms avec la version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          mkdir -p out
+          cp "$BUNDLE"/dmg/*.dmg "out/Symposium_${VERSION}_universal.dmg"
+          cp "$BUNDLE/macos/Symposium.app.tar.gz" "out/Symposium_${VERSION}_universal.app.tar.gz"
+          cp "$BUNDLE/macos/Symposium.app.tar.gz.sig" "out/Symposium_${VERSION}_universal.app.tar.gz.sig"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: out/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # Fichier lu par les applications installées pour savoir s'il existe une nouvelle version.
+      - name: latest.json (Windows et Mac)
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          EXE=$(cd dist && ls *-setup.exe)
+          MAC=$(cd dist && ls *.app.tar.gz)
+          jq -n \
+            --arg version "${TAG#v}" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg winSig "$(cat "dist/$EXE.sig")" --arg winUrl "$BASE/$EXE" \
+            --arg macSig "$(cat "dist/$MAC.sig")" --arg macUrl "$BASE/$MAC" \
+            '{version: $version, notes: ("Symposium " + $version), pub_date: $date, platforms: {
+              "windows-x86_64": {signature: $winSig, url: $winUrl},
+              "darwin-aarch64": {signature: $macSig, url: $macUrl},
+              "darwin-x86_64": {signature: $macSig, url: $macUrl}
+            }}' > dist/latest.json
+          cat dist/latest.json
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Symposium ${{ github.ref_name }}
+          files: dist/*
+          body: |
+            Application Symposium pour **Windows** (`…_x64-setup.exe`) et **Mac** (`…_universal.dmg`, Apple Silicon et Intel).
+            Les applications déjà installées se mettent à jour toutes seules.
+
+            Aucune des deux n'est signée par un certificat :
+            - **Windows** : « Windows a protégé votre ordinateur » → **Informations complémentaires** → **Exécuter quand même**.
+            - **Mac** : ouvre le .dmg, glisse Symposium dans Applications, puis au premier lancement : clic droit sur Symposium → **Ouvrir** → **Ouvrir**. Sur macOS 15 et plus : Réglages Système → Confidentialité et sécurité → **Ouvrir quand même**.

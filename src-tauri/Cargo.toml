@@ -1,6 +1,6 @@
 [package]
 name = "symposium-desktop"
-version = "0.3.0"
+version = "0.4.0"
 description = "Symposium : relie l'addon WoW: Forever au site symposium-gaming.com"
 authors = ["Guilde Symposium"]
 edition = "2021"

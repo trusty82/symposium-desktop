@@ -2,7 +2,7 @@
 
 Relie l'addon WoW: Forever **Symposium** au site de la guilde
 [symposium-gaming.com](https://symposium-gaming.com). Application [Tauri](https://tauri.app)
-(Rust + React), pour Windows.
+(Rust + React), pour Windows et Mac (universelle : Apple Silicon et Intel).
 
 ## Ce qu'elle fait
 
@@ -39,15 +39,18 @@ l'application), `lib.rs` (fenêtre, zone de notification, commandes). L'interfac
 
 ## Publier
 
-Pousser un tag `vX.Y.Z` (même version que `src-tauri/tauri.conf.json` et `package.json`) : le
-workflow **Windows** construit l'installeur `Symposium_X.Y.Z_x64-setup.exe` et crée une
-**Release** GitHub avec l'installeur, sa signature et `latest.json` : les applications installées
-se mettent à jour d'elles-mêmes.
+Pousser un tag `vX.Y.Z` (même version que `package.json`, `src-tauri/tauri.conf.json` et
+`src-tauri/Cargo.toml`) : le workflow **Release** construit l'installeur Windows
+(`Symposium_X.Y.Z_x64-setup.exe`) et l'application Mac universelle (`Symposium_X.Y.Z_universal.dmg`),
+puis crée une **Release** GitHub avec les installeurs, les paquets de mise à jour signés et
+`latest.json` (Windows et Mac) : les applications installées se mettent à jour d'elles-mêmes.
 
 Signature des mises à jour : clé privée dans les secrets du dépôt (`TAURI_SIGNING_PRIVATE_KEY`,
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`), clé publique dans `src-tauri/tauri.conf.json`. Sans la clé
 privée, plus aucune mise à jour ne peut être publiée : la garder en lieu sûr.
 
-L'installeur n'est pas signé : à la première installation, Windows SmartScreen affiche
-« Windows a protégé votre ordinateur » ; cliquer sur **Informations complémentaires** puis
-**Exécuter quand même**.
+Aucune application n'est signée par un certificat :
+- Windows : SmartScreen affiche « Windows a protégé votre ordinateur » → **Informations
+  complémentaires** → **Exécuter quand même**.
+- Mac (signature ad hoc) : au premier lancement, clic droit sur Symposium → **Ouvrir** ; sur
+  macOS 15 et plus, Réglages Système → Confidentialité et sécurité → **Ouvrir quand même**.
