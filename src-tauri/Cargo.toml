@@ -1,6 +1,6 @@
 [package]
 name = "symposium-desktop"
-version = "0.5.0"
+version = "0.6.0"
 description = "Symposium : relie l'addon WoW: Forever au site symposium-gaming.com"
 authors = ["Guilde Symposium"]
 edition = "2021"
@@ -28,6 +28,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 

@@ -79,3 +79,22 @@ pub fn download_addon(site: &str, token: &str) -> Result<Vec<u8>, String> {
     if !response.status().is_success() { return Err(error(response)); }
     response.bytes().map(|b| b.to_vec()).map_err(|e| format!("Téléchargement de l’addon interrompu : {e}"))
 }
+
+#[derive(Deserialize)]
+pub struct EncounterUploaded {
+    pub created: bool,
+    pub url: String,
+}
+
+/// Résumé d'un combat de boss (le journal lui-même reste sur l'ordinateur).
+pub fn upload_encounter(site: &str, token: &str, encounter: &crate::combatlog::Encounter) -> Result<EncounterUploaded, String> {
+    let response = client()
+        .post(url(site, "/encounters"))
+        .bearer_auth(token.trim())
+        .header("Accept", "application/json")
+        .json(encounter)
+        .send()
+        .map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
+}

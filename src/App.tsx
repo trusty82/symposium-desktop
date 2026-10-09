@@ -30,6 +30,8 @@ interface Settings {
     lastExportAt: number | null;
     lastSync: SyncReport | null;
     updateAddon: boolean;
+    uploadCombatLogs: boolean;
+    lastCombat: SyncReport | null;
 }
 
 interface Candidate {
@@ -82,8 +84,11 @@ export default function App() {
         invoke<AddonStatus>('addon_status').then(setAddon).catch(() => {});
         // Envoi automatique (déconnexion du jeu) : l'état se met à jour.
         const unlisten = listen<SyncReport>('sync', (event) => setSettings((s) => (s ? { ...s, lastSync: event.payload } : s)));
+        // Combat de boss envoyé depuis le journal de combat.
+        const unlistenCombat = listen<SyncReport>('combat', (event) => setSettings((s) => (s ? { ...s, lastCombat: event.payload } : s)));
         return () => {
             unlisten.then((stop) => stop());
+            unlistenCombat.then((stop) => stop());
         };
     }, []);
 
@@ -155,6 +160,17 @@ export default function App() {
     const toggleAddonUpdates = async () => {
         if (!settings) return;
         setSettings(await invoke<Settings>('save_settings', { token: settings.token, savedVariables: settings.savedVariables, updateAddon: !settings.updateAddon }));
+    };
+
+    const toggleCombatLogs = async () => {
+        if (!settings) return;
+        setSettings(
+            await invoke<Settings>('save_settings', {
+                token: settings.token,
+                savedVariables: settings.savedVariables,
+                uploadCombatLogs: !settings.uploadCombatLogs,
+            }),
+        );
     };
 
     const toggleAutostart = async () => {
@@ -327,6 +343,34 @@ export default function App() {
                 <label className="check">
                     <input type="checkbox" checked={settings?.updateAddon ?? true} onChange={toggleAddonUpdates} disabled={!settings} />
                     Mettre l’addon à jour automatiquement (version stable du site)
+                </label>
+            </section>
+
+            <section className="card">
+                <h2>
+                    <span className="step">5</span> Journaux de combat
+                </h2>
+                <p className="dim">
+                    Tape <strong>/combatlog</strong> en jeu au début du raid : à la fin de chaque combat de boss, Symposium envoie au site les dégâts,
+                    les soins et les morts de chacun. Le journal lui-même reste sur ton ordinateur.
+                </p>
+                {settings?.lastCombat && (
+                    <p className={settings.lastCombat.ok ? 'ok' : 'error'}>
+                        {settings.lastCombat.ok ? '✓' : '⚠'} {settings.lastCombat.message}
+                        <span className="dim small"> — {when(settings.lastCombat.at)}</span>
+                        {settings.lastCombat.url && (
+                            <>
+                                {' '}
+                                <button type="button" className="link" onClick={() => openUrl(settings.lastCombat!.url!)}>
+                                    Voir le combat
+                                </button>
+                            </>
+                        )}
+                    </p>
+                )}
+                <label className="check">
+                    <input type="checkbox" checked={settings?.uploadCombatLogs ?? true} onChange={toggleCombatLogs} disabled={!settings} />
+                    Envoyer mes combats de boss au site
                 </label>
             </section>
 

@@ -4,6 +4,7 @@
 
 mod addon;
 mod api;
+mod combatlog;
 mod savedvars;
 mod settings;
 mod sync;
@@ -35,9 +36,10 @@ fn get_settings(state: State<'_, Shared>) -> Settings {
 }
 
 #[tauri::command]
-fn save_settings(token: String, saved_variables: String, site_url: Option<String>, update_addon: Option<bool>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
+fn save_settings(token: String, saved_variables: String, site_url: Option<String>, update_addon: Option<bool>, upload_combat_logs: Option<bool>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
     let mut s = state.lock().unwrap();
     if let Some(update) = update_addon { s.update_addon = update; }
+    if let Some(upload) = upload_combat_logs { s.upload_combat_logs = upload; }
     if s.saved_variables != saved_variables { s.last_export_at = None; }
     s.token = token.trim().to_string();
     s.saved_variables = saved_variables.trim().to_string();
@@ -134,7 +136,8 @@ pub fn run() {
                 show(app.handle());
             }
 
-            sync::watch(app.handle().clone(), state, dir);
+            sync::watch(app.handle().clone(), state.clone(), dir.clone());
+            combatlog::watch(app.handle().clone(), state, dir);
             update::watch(app.handle().clone());
             Ok(())
         })
