@@ -4,6 +4,8 @@ version = "0.7.0"
 description = "Symposium : relie l'addon WoW: Forever au site symposium-gaming.com"
 authors = ["Guilde Symposium"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/trusty82/symposium-desktop"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

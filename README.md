@@ -4,6 +4,10 @@ Relie l'addon WoW: Forever **Symposium** au site de la guilde
 [symposium-gaming.com](https://symposium-gaming.com). Application [Tauri](https://tauri.app)
 (Rust + React), pour Windows et Mac (universelle : Apple Silicon et Intel).
 
+Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNING_POLICY.md)
+(signature gratuite fournie par [SignPath.io](https://signpath.io), certificat de la
+[SignPath Foundation](https://signpath.org)).
+
 ## Ce qu'elle fait
 
 - Surveille `WTF\Account\<compte>\SavedVariables\Symposium.lua` (écrit par l'addon à la
@@ -54,3 +58,7 @@ Aucune application n'est signée par un certificat :
   complémentaires** → **Exécuter quand même**.
 - Mac (signature ad hoc) : au premier lancement, clic droit sur Symposium → **Ouvrir** ; sur
   macOS 15 et plus, Réglages Système → Confidentialité et sécurité → **Ouvrir quand même**.
+
+## Licence
+
+[MIT](LICENSE). Signature du code : [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
