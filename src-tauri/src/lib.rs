@@ -83,6 +83,29 @@ async fn update_addon_now(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || update::update_addon(&app, true)).await.map_err(|e| e.to_string())?
 }
 
+/// Classement EPGP récupéré tout de suite et déposé pour l'addon (pris en compte au /reload).
+#[tauri::command]
+async fn refresh_standings(state: State<'_, Shared>) -> Result<String, String> {
+    let settings = state.lock().unwrap().clone();
+    if !settings.ready() {
+        return Err("Renseigne d’abord ton jeton et le fichier de l’addon (Liaison).".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::Path::new(&settings.saved_variables);
+        // L'addon témoin doit être là pour recevoir le classement.
+        addon::sync_marker(path, true, settings.upload_combat_logs)?;
+        let standings = api::standings(&settings.site_url, &settings.token)?;
+        let changed = addon::write_standings(path, &standings.code)?;
+        Ok(format!(
+            "Classement EPGP récupéré ({} joueurs){}. Fais /reload en jeu pour le charger.",
+            standings.members.len(),
+            if changed { "" } else { ", identique au précédent" }
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Recherche une mise à jour tout de suite ; l'installe s'il y en a une.
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
@@ -148,7 +171,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

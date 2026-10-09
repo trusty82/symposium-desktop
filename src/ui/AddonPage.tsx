@@ -51,6 +51,12 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
                     Je récupère ton classement sur le site toutes les 10 minutes et je le dépose pour l’addon : il se charge tout seul à la connexion
                     ou au /reload. Plus de code à copier, et tu vois tes points en jeu.
                 </p>
+                <div className="row">
+                    <button type="button" className="btn ghost" onClick={ctx.refreshStandings} disabled={Boolean(ctx.busy) || !ctx.ready}>
+                        <Icon name="refresh" size={18} /> Récupérer le classement maintenant
+                    </button>
+                </div>
+                <p className="dim small">Après une correction sur le site : clique ici, puis /reload en jeu.</p>
             </section>
 
             <section className="panel">

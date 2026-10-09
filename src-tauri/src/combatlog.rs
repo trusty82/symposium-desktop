@@ -359,8 +359,8 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
             }
             // Classement EPGP : au démarrage puis toutes les 10 minutes (ignoré pour un non-membre).
             if settings.ready() && tick % 120 == 1 {
-                if let Ok(code) = api::standings(&settings.site_url, &settings.token) {
-                    let _ = crate::addon::write_standings(Path::new(&settings.saved_variables), &code);
+                if let Ok(standings) = api::standings(&settings.site_url, &settings.token) {
+                    let _ = crate::addon::write_standings(Path::new(&settings.saved_variables), &standings.code);
                 }
             }
             if !settings.ready() || !settings.upload_combat_logs {
