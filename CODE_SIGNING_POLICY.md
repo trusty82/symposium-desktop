@@ -36,8 +36,8 @@ under this project.
 
 | Role | Members |
 | --- | --- |
-| Committers and reviewers | [Rémi Bouille (@trusty82)](https://github.com/trusty82) |
-| Approvers | [Rémi Bouille (@trusty82)](https://github.com/trusty82) |
+| Committers and reviewers | [@trusty82](https://github.com/trusty82) |
+| Approvers | [@trusty82](https://github.com/trusty82) |
 
 All team members use multi-factor authentication on GitHub and on SignPath. Changes from
 outside contributors are only merged after review by a committer.
