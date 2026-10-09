@@ -46,6 +46,14 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
             </section>
 
             <section className="panel">
+                <h2>Classement EPGP</h2>
+                <p className="dim">
+                    Je récupère ton classement sur le site toutes les 10 minutes et je le dépose pour l’addon : il se charge tout seul à la connexion
+                    ou au /reload. Plus de code à copier, et tu vois tes points en jeu.
+                </p>
+            </section>
+
+            <section className="panel">
                 <Switch
                     checked={ctx.settings?.updateAddon ?? true}
                     onChange={() => ctx.save({ updateAddon: !(ctx.settings?.updateAddon ?? true) })}

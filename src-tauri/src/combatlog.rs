@@ -342,15 +342,25 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
     thread::spawn(move || {
         let mut reader: Option<Reader> = None;
         let mut pending: Vec<Encounter> = Vec::new();
-        let mut marker: Option<(String, bool)> = None;
+        let mut marker: Option<(String, bool, bool)> = None;
+        let mut tick: u32 = 0;
         loop {
             thread::sleep(Duration::from_secs(5));
+            tick = tick.wrapping_add(1);
             let settings = state.lock().unwrap().clone();
-            // Addon témoin pour le journal automatique : suit la case « Envoyer mes combats ».
-            let wanted = (settings.saved_variables.clone(), settings.ready() && settings.upload_combat_logs);
+            // Addon témoin : installé quand l'application est configurée ; il porte la case
+            // « Envoyer mes combats » (journal automatique) et le classement EPGP.
+            let wanted = (settings.saved_variables.clone(), settings.ready(), settings.upload_combat_logs);
             if marker.as_ref() != Some(&wanted) && !settings.saved_variables.is_empty() {
-                if crate::addon::sync_marker(Path::new(&settings.saved_variables), wanted.1).is_ok() {
+                if crate::addon::sync_marker(Path::new(&settings.saved_variables), wanted.1, wanted.2).is_ok() {
                     marker = Some(wanted);
+                    tick = 0;
+                }
+            }
+            // Classement EPGP : au démarrage puis toutes les 10 minutes (ignoré pour un non-membre).
+            if settings.ready() && tick % 120 == 1 {
+                if let Ok(code) = api::standings(&settings.site_url, &settings.token) {
+                    let _ = crate::addon::write_standings(Path::new(&settings.saved_variables), &code);
                 }
             }
             if !settings.ready() || !settings.upload_combat_logs {
