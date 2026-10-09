@@ -342,9 +342,17 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
     thread::spawn(move || {
         let mut reader: Option<Reader> = None;
         let mut pending: Vec<Encounter> = Vec::new();
+        let mut marker: Option<(String, bool)> = None;
         loop {
             thread::sleep(Duration::from_secs(5));
             let settings = state.lock().unwrap().clone();
+            // Addon témoin pour le journal automatique : suit la case « Envoyer mes combats ».
+            let wanted = (settings.saved_variables.clone(), settings.ready() && settings.upload_combat_logs);
+            if marker.as_ref() != Some(&wanted) && !settings.saved_variables.is_empty() {
+                if crate::addon::sync_marker(Path::new(&settings.saved_variables), wanted.1).is_ok() {
+                    marker = Some(wanted);
+                }
+            }
             if !settings.ready() || !settings.upload_combat_logs {
                 continue;
             }

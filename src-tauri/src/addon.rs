@@ -153,3 +153,60 @@ mod tests {
         assert_eq!(addon_dir(sv).unwrap(), Path::new("C:/WoW/_classic_beta_/Interface/AddOns/Symposium"));
     }
 }
+
+/// Petit addon « SymposiumDesktop » : signale à l'addon Symposium que l'application
+/// est là (journal de combat automatique en donjon et en raid). Installé quand
+/// l'envoi des combats est activé, retiré sinon. Pris en compte au /reload suivant.
+pub fn sync_marker(saved_variables: &Path, wanted: bool) -> Result<bool, String> {
+    let Some(main) = addon_dir(saved_variables) else { return Ok(false) };
+    let marker = main.with_file_name("SymposiumDesktop");
+    if !wanted {
+        if marker.exists() {
+            fs::remove_dir_all(&marker).map_err(|e| e.to_string())?;
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+    // Même version d'interface que l'addon principal, pour ne pas être « périmé ».
+    let interface = fs::read_to_string(main.join("Symposium.toc"))
+        .ok()
+        .and_then(|toc| toc.lines().find_map(|l| l.trim().strip_prefix("## Interface:").map(|v| v.trim().to_string())))
+        .unwrap_or_else(|| "16001".into());
+    let toc = format!(
+        "## Interface: {interface}\n## Title: Symposium (application)\n## Notes: Installé par l'application Symposium : journal de combat automatique en donjon et en raid.\n## Version: 1\n\nSymposiumDesktop.lua\n"
+    );
+    let lua = "-- Installé par l'application Symposium : l'addon Symposium lance le journal de combat en instance.\nSYMPOSIUM_DESKTOP = true\n";
+    if fs::read_to_string(marker.join("SymposiumDesktop.toc")).ok().as_deref() == Some(toc.as_str()) {
+        return Ok(false);
+    }
+    fs::create_dir_all(&marker).map_err(|e| e.to_string())?;
+    fs::write(marker.join("SymposiumDesktop.toc"), toc).map_err(|e| e.to_string())?;
+    fs::write(marker.join("SymposiumDesktop.lua"), lua).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+
+    #[test]
+    fn installe_et_retire_l_addon_temoin() {
+        let root = std::env::temp_dir().join(format!("symposium-marqueur-{}", std::process::id()));
+        let sv = root.join("_classic_beta_/WTF/Account/COMPTE/SavedVariables/Symposium.lua");
+        let main = root.join("_classic_beta_/Interface/AddOns/Symposium");
+        fs::create_dir_all(&main).unwrap();
+        fs::write(main.join("Symposium.toc"), "## Interface: 16002\n## Version: 0.11.0\n").unwrap();
+        let marker = main.with_file_name("SymposiumDesktop");
+
+        assert_eq!(sync_marker(&sv, true), Ok(true));
+        let toc = fs::read_to_string(marker.join("SymposiumDesktop.toc")).unwrap();
+        assert!(toc.starts_with("## Interface: 16002\n"));
+        assert!(marker.join("SymposiumDesktop.lua").exists());
+        // Déjà en place : rien à refaire.
+        assert_eq!(sync_marker(&sv, true), Ok(false));
+
+        assert_eq!(sync_marker(&sv, false), Ok(true));
+        assert!(!marker.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+}
