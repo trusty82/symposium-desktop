@@ -2,7 +2,7 @@
   "name": "symposium-desktop",
   "private": true,
   "license": "MIT",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fontsource/alegreya-sans": "^5.3.0",
+    "@fontsource/cinzel": "^5.3.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-notification": "^2.5.1",
