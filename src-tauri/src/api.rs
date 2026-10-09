@@ -98,3 +98,15 @@ pub fn upload_encounter(site: &str, token: &str, encounter: &crate::combatlog::E
     if !response.status().is_success() { return Err(error(response)); }
     response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
 }
+
+#[derive(Deserialize)]
+struct Standings {
+    code: String,
+}
+
+/// Classement EPGP du site, en code SYMPE1 pour l'addon (membres seulement).
+pub fn standings(site: &str, token: &str) -> Result<String, String> {
+    let response = client().get(url(site, "/epgp/standings")).bearer_auth(token.trim()).header("Accept", "application/json").send().map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.json::<Standings>().map(|s| s.code).map_err(|e| format!("Réponse du site illisible : {e}"))
+}
