@@ -40,6 +40,7 @@ export interface Ctx {
     updateAddon: () => Promise<void>;
     checkUpdate: () => Promise<void>;
     toggleAutostart: () => Promise<void>;
+    refreshStandings: () => Promise<void>;
 }
 
 const fromReport = (kind: Activity['kind'], r: SyncReport): Activity => ({
@@ -187,6 +188,18 @@ export default function App() {
                 setBusy(null);
             }
         },
+        refreshStandings: async () => {
+            setBusy('Récupération du classement EPGP…');
+            try {
+                const message = await invoke<string>('refresh_standings');
+                notify(message);
+                push({ id: `epgp-${Date.now()}`, at: Date.now() / 1000, kind: 'addon', ok: true, message });
+            } catch (e) {
+                notify(String(e), false);
+            } finally {
+                setBusy(null);
+            }
+        },
         toggleAutostart: async () => {
             if (autostart) await disable();
             else await enable();
@@ -197,6 +210,7 @@ export default function App() {
     const commands: Command[] = [
         { id: 'sync', label: 'Envoyer ma fiche maintenant', icon: 'send', run: ctx.syncNow, disabled: !ready },
         { id: 'addon', label: 'Mettre à jour l’addon', icon: 'addon', run: ctx.updateAddon, disabled: !addon?.updateAvailable },
+        { id: 'epgp', label: 'Récupérer le classement EPGP maintenant', icon: 'refresh', run: ctx.refreshStandings, disabled: !ready },
         { id: 'update', label: 'Rechercher une mise à jour de Symposium', icon: 'refresh', run: ctx.checkUpdate },
         { id: 'site', label: 'Ouvrir le site de la guilde', icon: 'external', run: () => ctx.open(site) },
         { id: 'profil', label: 'Ouvrir mon profil (jeton)', icon: 'external', run: () => ctx.open(`${site}/profil#application`) },

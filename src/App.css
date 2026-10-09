@@ -289,6 +289,11 @@ p {
     color: var(--dim);
 }
 
+p.small {
+    font-size: 14px;
+    margin-top: 10px;
+}
+
 .good,
 .bad,
 .warn {
