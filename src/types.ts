@@ -21,6 +21,7 @@ export interface Settings {
     lastExportAt: number | null;
     lastSync: SyncReport | null;
     updateAddon: boolean;
+    betaAddon: boolean;
     uploadCombatLogs: boolean;
     lastCombat: SyncReport | null;
 }

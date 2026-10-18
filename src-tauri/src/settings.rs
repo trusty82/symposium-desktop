@@ -20,6 +20,8 @@ pub struct Settings {
     pub last_sync: Option<SyncReport>,
     /// Mettre à jour l'addon Symposium tout seul (version stable du site).
     pub update_addon: bool,
+    /// Recevoir la bêta de l'addon (branche addon-beta du site) quand il y en a une.
+    pub beta_addon: bool,
     /// Envoyer les combats de boss du journal de combat (/combatlog en jeu).
     pub upload_combat_logs: bool,
     /// Résultat du dernier envoi d'un combat.
@@ -28,7 +30,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { site_url: DEFAULT_SITE.into(), token: String::new(), saved_variables: String::new(), last_export_at: None, last_sync: None, update_addon: true, upload_combat_logs: true, last_combat: None }
+        Self { site_url: DEFAULT_SITE.into(), token: String::new(), saved_variables: String::new(), last_export_at: None, last_sync: None, update_addon: true, beta_addon: false, upload_combat_logs: true, last_combat: None }
     }
 }
 

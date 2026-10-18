@@ -34,7 +34,7 @@ export interface Ctx {
     go: (page: Page) => void;
     open: (url: string) => void;
     notify: (message: string, ok?: boolean) => void;
-    save: (patch: Partial<Pick<Settings, 'token' | 'savedVariables' | 'updateAddon' | 'uploadCombatLogs'>>) => Promise<boolean>;
+    save: (patch: Partial<Pick<Settings, 'token' | 'savedVariables' | 'updateAddon' | 'betaAddon' | 'uploadCombatLogs'>>) => Promise<boolean>;
     detect: () => Promise<void>;
     syncNow: () => Promise<void>;
     updateAddon: () => Promise<void>;
@@ -138,6 +138,7 @@ export default function App() {
                     token: patch.token ?? settings.token,
                     savedVariables: patch.savedVariables ?? settings.savedVariables,
                     updateAddon: patch.updateAddon,
+                    betaAddon: patch.betaAddon,
                     uploadCombatLogs: patch.uploadCombatLogs,
                 });
                 setSettings(next);

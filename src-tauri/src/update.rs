@@ -33,7 +33,7 @@ pub async fn check_and_install(app: &AppHandle) -> Result<Option<String>, String
 pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, String> {
     let settings = app.state::<Shared>().lock().unwrap().clone();
     if !settings.ready() || (!force && !settings.update_addon) { return Ok(None); }
-    let latest = api::me(&settings.site_url, &settings.token)?.addon_version;
+    let latest = addon::latest(&settings, &api::me(&settings.site_url, &settings.token)?);
     if !addon::status(&settings, latest).update_available { return Ok(None); }
     let version = addon::install(&settings)?;
     let _ = app
