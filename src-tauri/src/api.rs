@@ -11,6 +11,9 @@ pub struct Me {
     pub member: bool,
     pub council: bool,
     pub addon_version: Option<String>,
+    /// Bêta de l'addon, seulement si elle est plus récente que la stable (site récent).
+    #[serde(default)]
+    pub addon_beta_version: Option<String>,
     pub characters: Vec<MeCharacter>,
 }
 
@@ -74,8 +77,9 @@ pub fn upload(site: &str, token: &str, code: &str) -> Result<Uploaded, String> {
 }
 
 /// Zip de l'addon (version stable du site).
-pub fn download_addon(site: &str, token: &str) -> Result<Vec<u8>, String> {
-    let response = client().get(url(site, "/addon")).bearer_auth(token.trim()).send().map_err(|e| format!("Site injoignable : {e}"))?;
+/// Le zip de l'addon : la bêta si `beta` et qu'il y en a une plus récente, sinon la stable.
+pub fn download_addon(site: &str, token: &str, beta: bool) -> Result<Vec<u8>, String> {
+    let response = client().get(url(site, if beta { "/addon?canal=beta" } else { "/addon" })).bearer_auth(token.trim()).send().map_err(|e| format!("Site injoignable : {e}"))?;
     if !response.status().is_success() { return Err(error(response)); }
     response.bytes().map(|b| b.to_vec()).map_err(|e| format!("Téléchargement de l’addon interrompu : {e}"))
 }

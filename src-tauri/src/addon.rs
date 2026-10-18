@@ -50,10 +50,20 @@ pub fn compare(a: &str, b: &str) -> Ordering {
     }
 }
 
+/// La version à installer : la bêta si elle est cochée et qu'il y en a une, sinon la stable.
+pub fn latest(settings: &Settings, me: &api::Me) -> Option<String> {
+    if settings.beta_addon {
+        if let Some(beta) = &me.addon_beta_version { return Some(beta.clone()); }
+    }
+    me.addon_version.clone()
+}
+
 pub fn status(settings: &Settings, latest: Option<String>) -> AddonStatus {
     let dir = addon_dir(Path::new(&settings.saved_variables));
     let installed = dir.as_deref().and_then(installed_version);
     let update_available = match (&installed, &latest) {
+        // Bêta décochée : retour à la stable, même plus ancienne que la bêta installée.
+        (Some(i), Some(l)) if !settings.beta_addon && i.contains('-') && !l.contains('-') => l != i,
         (Some(i), Some(l)) => compare(l, i) == Ordering::Greater,
         (None, Some(_)) => dir.as_ref().is_some_and(|d| d.parent().is_some_and(Path::is_dir)),
         _ => false,
@@ -67,7 +77,7 @@ pub fn install(settings: &Settings) -> Result<String, String> {
     let addons = dir.parent().ok_or("Dossier AddOns introuvable.")?;
     fs::create_dir_all(addons).map_err(|e| format!("Dossier AddOns inaccessible : {e}"))?;
 
-    let bytes = api::download_addon(&settings.site_url, &settings.token)?;
+    let bytes = api::download_addon(&settings.site_url, &settings.token, settings.beta_addon)?;
     install_zip(&dir, bytes)
 }
 
@@ -109,6 +119,37 @@ pub fn install_zip(dir: &Path, bytes: Vec<u8>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bascule_entre_la_beta_et_la_stable() {
+        let root = std::env::temp_dir().join("symposium-desktop-beta-test");
+        let _ = fs::remove_dir_all(&root);
+        let saved = root.join("WTF/Account/COMPTE/SavedVariables/Symposium.lua");
+        let addon = root.join("Interface/AddOns/Symposium");
+        fs::create_dir_all(&addon).unwrap();
+        let me = |beta: Option<&str>| api::Me {
+            name: "Wav".into(), member: true, council: false, addon_version: Some("0.11.0".into()),
+            addon_beta_version: beta.map(String::from), characters: vec![],
+        };
+        let mut settings = Settings { saved_variables: saved.to_string_lossy().to_string(), ..Settings::default() };
+
+        // Bêta cochée : on la reçoit si le site en a une, sinon la stable.
+        fs::write(addon.join("Symposium.toc"), "## Version: 0.11.0\n").unwrap();
+        settings.beta_addon = true;
+        assert_eq!(latest(&settings, &me(Some("0.12.0-beta1"))).as_deref(), Some("0.12.0-beta1"));
+        assert_eq!(latest(&settings, &me(None)).as_deref(), Some("0.11.0"));
+        assert!(status(&settings, latest(&settings, &me(Some("0.12.0-beta1")))).update_available);
+
+        // Bêta installée puis décochée : retour à la stable.
+        fs::write(addon.join("Symposium.toc"), "## Version: 0.12.0-beta1\n").unwrap();
+        assert!(!status(&settings, latest(&settings, &me(Some("0.12.0-beta1")))).update_available);
+        settings.beta_addon = false;
+        assert_eq!(latest(&settings, &me(Some("0.12.0-beta1"))).as_deref(), Some("0.11.0"));
+        assert!(status(&settings, Some("0.11.0".into())).update_available);
+        // La stable de la bêta : simple mise à jour.
+        assert!(status(&settings, Some("0.12.0".into())).update_available);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn compare_les_versions() {

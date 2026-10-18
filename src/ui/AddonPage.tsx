@@ -10,7 +10,10 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
             <header className="page-head">
                 <p className="eyebrow">Addon</p>
                 <h1>Symposium, en jeu</h1>
-                <p className="lead">Je garde l’addon à jour pour toi, avec la version stable du site.</p>
+                <p className="lead">
+                    Je garde l’addon à jour pour toi, avec la version stable du site
+                    {ctx.settings?.betaAddon ? ', ou la bêta quand il y en a une' : ''}.
+                </p>
             </header>
 
             <section className="panel">
@@ -26,7 +29,7 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
                             <Icon name="arrow" size={28} />
                         </div>
                         <div className="version">
-                            <small>Sur le site</small>
+                            <small>{a.latest?.includes('-') ? 'Bêta du site' : 'Sur le site'}</small>
                             <strong>{a.latest ?? '—'}</strong>
                         </div>
                         <p className={`version-state ${a.updateAvailable ? 'warn' : 'good'}`}>
@@ -66,6 +69,19 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
                     disabled={!ctx.settings}
                     label="Mise à jour automatique de l’addon"
                     hint="Au lancement, puis toutes les 6 heures. L’ancienne version est gardée à côté, au cas où."
+                />
+            </section>
+
+            <section className="panel">
+                <Switch
+                    checked={ctx.settings?.betaAddon ?? false}
+                    onChange={async () => {
+                        // Installée tout de suite : on teste sans attendre la prochaine vérification.
+                        if (await ctx.save({ betaAddon: !(ctx.settings?.betaAddon ?? false) })) await ctx.updateAddon();
+                    }}
+                    disabled={!ctx.settings || Boolean(ctx.busy)}
+                    label="Addon bêta"
+                    hint="Les nouveautés avant leur sortie, pour les tester. Une bêta peut avoir des bugs : signale-les au Conseil. Décoche pour revenir à la version stable."
                 />
             </section>
         </div>

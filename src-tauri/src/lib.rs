@@ -36,9 +36,10 @@ fn get_settings(state: State<'_, Shared>) -> Settings {
 }
 
 #[tauri::command]
-fn save_settings(token: String, saved_variables: String, site_url: Option<String>, update_addon: Option<bool>, upload_combat_logs: Option<bool>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
+fn save_settings(token: String, saved_variables: String, site_url: Option<String>, update_addon: Option<bool>, beta_addon: Option<bool>, upload_combat_logs: Option<bool>, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Settings, String> {
     let mut s = state.lock().unwrap();
     if let Some(update) = update_addon { s.update_addon = update; }
+    if let Some(beta) = beta_addon { s.beta_addon = beta; }
     if let Some(upload) = upload_combat_logs { s.upload_combat_logs = upload; }
     if s.saved_variables != saved_variables { s.last_export_at = None; }
     s.token = token.trim().to_string();
@@ -70,7 +71,7 @@ async fn sync_now(app: AppHandle, state: State<'_, Shared>, dir: State<'_, Confi
 async fn addon_status(state: State<'_, Shared>) -> Result<addon::AddonStatus, String> {
     let settings = state.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let latest = if settings.token.is_empty() { None } else { api::me(&settings.site_url, &settings.token).ok().and_then(|m| m.addon_version) };
+        let latest = if settings.token.is_empty() { None } else { api::me(&settings.site_url, &settings.token).ok().and_then(|m| addon::latest(&settings, &m)) };
         addon::status(&settings, latest)
     })
     .await
