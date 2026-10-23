@@ -1,15 +1,17 @@
 //! Mise à jour automatique : au démarrage puis toutes les 6 heures, l'application
 //! cherche une nouvelle version (Releases GitHub, latest.json signé), l'installe
 //! et redémarre. Les mises à jour sont signées : une version non signée par la
-//! clé du projet est refusée.
+//! clé du projet est refusée. L'addon, lui, est vérifié toutes les 10 minutes.
 
 use crate::{addon, api, sync::Shared};
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
-const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+const APP_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// Une nouvelle version de l'addon (stable ou bêta) arrive dans les 10 minutes.
+const ADDON_EVERY: Duration = Duration::from_secs(10 * 60);
 
 /// Renvoie la version installée, ou None si l'application est déjà à jour.
 pub async fn check_and_install(app: &AppHandle) -> Result<Option<String>, String> {
@@ -36,6 +38,8 @@ pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, Stri
     let latest = addon::latest(&settings, &api::me(&settings.site_url, &settings.token)?);
     if !addon::status(&settings, latest).update_available { return Ok(None); }
     let version = addon::install(&settings)?;
+    // La fenêtre se met à jour (version installée, fil d'activité).
+    let _ = app.emit("addon", &version);
     let _ = app
         .notification()
         .builder()
@@ -45,18 +49,27 @@ pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, Stri
     Ok(Some(version))
 }
 
-/// Vérifie au démarrage (après 30 secondes), puis toutes les 6 heures : l'application, puis l'addon.
+/// Vérifie au démarrage (après 30 secondes) : l'application toutes les 6 heures, l'addon toutes les 10 minutes.
 pub fn watch(app: AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(30));
+        let mut last_app: Option<std::time::Instant> = None;
         loop {
-            if let Err(e) = tauri::async_runtime::block_on(check_and_install(&app)) {
-                eprintln!("{e}");
+            if last_app.map_or(true, |t| t.elapsed() >= APP_EVERY) {
+                last_app = Some(std::time::Instant::now());
+                if let Err(e) = tauri::async_runtime::block_on(check_and_install(&app)) {
+                    eprintln!("{e}");
+                }
             }
-            if let Err(e) = update_addon(&app, false) {
-                eprintln!("{e}");
+            match update_addon(&app, false) {
+                Err(e) => eprintln!("{e}"),
+                // Mise à jour automatique désactivée : la fenêtre signale quand même la nouvelle version.
+                Ok(None) => {
+                    let _ = app.emit("addon-check", ());
+                }
+                Ok(Some(_)) => {}
             }
-            std::thread::sleep(EVERY);
+            std::thread::sleep(ADDON_EVERY);
         }
     });
 }
