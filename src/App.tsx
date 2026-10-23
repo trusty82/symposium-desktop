@@ -97,6 +97,21 @@ export default function App() {
             setSettings((s) => (s ? { ...s, lastCombat: e.payload } : s));
             push(fromReport('combat', e.payload));
         });
+        // Addon vérifié en arrière-plan (toutes les 10 minutes) : installé tout seul, ou à proposer.
+        const offAddon = listen<string>('addon', (e) => {
+            const message = `Addon mis à jour en ${e.payload} : fais /reload en jeu.`;
+            push({ id: `addon-${e.payload}`, at: Date.now() / 1000, kind: 'addon', ok: true, message });
+            refreshAddon();
+        });
+        const offAddonCheck = listen('addon-check', () => refreshAddon());
+        // En revenant sur la fenêtre, l'état de l'addon est relu (au plus une fois par minute).
+        let lastFocus = 0;
+        const onFocus = () => {
+            if (Date.now() - lastFocus < 60_000) return;
+            lastFocus = Date.now();
+            refreshAddon();
+        };
+        window.addEventListener('focus', onFocus);
         // L'application a suivi une autre version du jeu (Bêta, Stress Test…).
         const offSettings = listen('settings', () => {
             invoke<Settings>('get_settings').then(setSettings);
@@ -106,6 +121,9 @@ export default function App() {
             offSync.then((stop) => stop());
             offCombat.then((stop) => stop());
             offSettings.then((stop) => stop());
+            offAddon.then((stop) => stop());
+            offAddonCheck.then((stop) => stop());
+            window.removeEventListener('focus', onFocus);
         };
     }, [push, refreshAddon]);
 
@@ -175,7 +193,7 @@ export default function App() {
                 const installed = await invoke<string | null>('update_addon_now');
                 const message = installed ? `Addon mis à jour en ${installed} : fais /reload en jeu.` : 'L’addon est déjà à jour.';
                 notify(message);
-                if (installed) push({ id: `addon-${Date.now()}`, at: Date.now() / 1000, kind: 'addon', ok: true, message });
+                if (installed) push({ id: `addon-${installed}`, at: Date.now() / 1000, kind: 'addon', ok: true, message });
                 refreshAddon();
             } catch (e) {
                 notify(String(e), false);

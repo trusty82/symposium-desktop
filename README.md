@@ -16,7 +16,8 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
 - Se connecte au site avec un **jeton personnel**, créé dans le profil (section
   « Application Symposium ») ; API `/api/desktop/…` du site.
 - Met à jour l'addon Symposium dans le dossier du jeu (version stable du site, désactivable) :
-  l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`). Case « Addon bêta » (0.10.0) :
+  l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`). Vérifiée toutes les 10 minutes
+  (0.11.1), et à chaque retour sur la fenêtre pour l'affichage. Case « Addon bêta » (0.10.0) :
   la bêta du site (branche `addon-beta`, `/api/desktop/addon?canal=beta`) quand elle est plus
   récente que la stable ; décochée, retour à la stable.
 - Suit la version du jeu où l'on joue (0.11.0) : avec plusieurs versions installées côte à côte
