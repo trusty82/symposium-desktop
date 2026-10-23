@@ -97,9 +97,15 @@ export default function App() {
             setSettings((s) => (s ? { ...s, lastCombat: e.payload } : s));
             push(fromReport('combat', e.payload));
         });
+        // L'application a suivi une autre version du jeu (Bêta, Stress Test…).
+        const offSettings = listen('settings', () => {
+            invoke<Settings>('get_settings').then(setSettings);
+            refreshAddon();
+        });
         return () => {
             offSync.then((stop) => stop());
             offCombat.then((stop) => stop());
+            offSettings.then((stop) => stop());
         };
     }, [push, refreshAddon]);
 

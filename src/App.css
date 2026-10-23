@@ -1194,3 +1194,32 @@ summary {
         transition: none !important;
     }
 }
+
+/* Anciens journaux de combat (page Combats). */
+.logs {
+    list-style: none;
+    margin: 12px 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.logs li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(240, 212, 155, 0.15);
+    border-radius: 10px;
+}
+
+.logs li > span {
+    flex: 1;
+    min-width: 0;
+}
+
+.logs small {
+    display: block;
+    overflow-wrap: anywhere;
+    opacity: 0.75;
+}

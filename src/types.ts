@@ -32,6 +32,14 @@ export interface Candidate {
     account: string;
 }
 
+export interface LogFile {
+    path: string;
+    flavor: string;
+    /** Secondes depuis 1970. */
+    modified: number;
+    size: number;
+}
+
 export interface Me {
     name: string;
     member: boolean;
@@ -52,6 +60,7 @@ export type Page = 'home' | 'link' | 'addon' | 'combat' | 'settings';
 
 export const FLAVORS: Record<string, string> = {
     _classic_beta_: 'WoW: Forever',
+    _classic_ptr_: 'Serveur de test',
     _classic_: 'Classic',
     _classic_era_: 'Classic Era',
     _retail_: 'Retail',

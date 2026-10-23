@@ -19,6 +19,11 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`). Case « Addon bêta » (0.10.0) :
   la bêta du site (branche `addon-beta`, `/api/desktop/addon?canal=beta`) quand elle est plus
   récente que la stable ; décochée, retour à la stable.
+- Suit la version du jeu où l'on joue (0.11.0) : avec plusieurs versions installées côte à côte
+  (Bêta, Stress Test…), l'application passe toute seule sur celle qui a servi en dernier, si
+  l'addon Symposium y est installé (`flavors.rs`). Les journaux de combat de toutes ces versions
+  sont surveillés, et la page Combats renvoie à la main les combats d'un journal des 30 derniers
+  jours (« Anciens journaux »).
 - Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).
@@ -41,7 +46,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Le code Rust est dans `src-tauri/src` : `savedvars.rs` (fichier de l'addon), `api.rs` (site),
 `sync.rs` (surveillance et envoi), `settings.rs` (réglages, dans le dossier de configuration de
-l'application), `lib.rs` (fenêtre, zone de notification, commandes). L'interface est dans `src/`.
+l'application), `combatlog.rs` (journal de combat), `flavors.rs` (versions du jeu installées), `lib.rs` (fenêtre, zone de notification, commandes). L'interface est dans `src/`.
 
 ## Publier
 

@@ -5,6 +5,7 @@
 mod addon;
 mod api;
 mod combatlog;
+mod flavors;
 mod savedvars;
 mod settings;
 mod sync;
@@ -107,6 +108,29 @@ async fn refresh_standings(state: State<'_, Shared>) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Journaux de combat des 30 derniers jours, toutes versions du jeu confondues.
+#[tauri::command]
+fn recent_logs(state: State<'_, Shared>) -> Vec<combatlog::LogFile> {
+    let saved_variables = state.lock().unwrap().saved_variables.clone();
+    combatlog::recent_logs(std::path::Path::new(&saved_variables))
+}
+
+/// Envoie au site tous les combats de boss d'un journal déjà écrit (un soir où l'envoi n'a pas eu lieu).
+#[tauri::command]
+async fn send_log(path: String, state: State<'_, Shared>) -> Result<String, String> {
+    let settings = state.lock().unwrap().clone();
+    if !settings.ready() {
+        return Err("Renseigne d’abord ton jeton et le fichier de l’addon (Liaison).".into());
+    }
+    // Seulement un journal de combat du jeu, pas n'importe quel fichier.
+    if !combatlog::recent_logs(std::path::Path::new(&settings.saved_variables)).iter().any(|l| l.path == path) {
+        return Err("Journal introuvable : actualise la liste.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || combatlog::send_file(&settings.site_url, &settings.token, std::path::Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Recherche une mise à jour tout de suite ; l'installe s'il y en a une.
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
@@ -172,7 +196,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

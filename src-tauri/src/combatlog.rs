@@ -9,12 +9,13 @@ use serde::Serialize;
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    io::{Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime},
 };
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 
 /// Derniers coups reçus gardés pour expliquer une mort.
 const RECAP: usize = 5;
@@ -282,27 +283,107 @@ impl Parser {
     }
 }
 
-/// Dossier Logs du jeu, à côté de WTF (déduit du fichier de l'addon).
-pub fn logs_dir(saved_variables: &Path) -> Option<PathBuf> {
-    // SavedVariables → <compte> → Account → WTF → <version du jeu>
-    let flavor = saved_variables.parent()?.parent()?.parent()?.parent()?.parent()?;
-    Some(flavor.join("Logs"))
+/// Un journal de combat sur le disque, proposé à l'envoi à la main.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFile {
+    pub path: String,
+    /// Version du jeu (_classic_beta_…).
+    pub flavor: String,
+    /// Secondes depuis 1970.
+    pub modified: i64,
+    pub size: u64,
+}
+
+/// Journaux de combat de toutes les versions du jeu installées côte à côte (Bêta,
+/// Stress Test…), du plus récent au plus ancien, écrits depuis `max_age`.
+fn logs(saved_variables: &Path, max_age: Duration) -> Vec<(PathBuf, String, SystemTime, u64)> {
+    let since = SystemTime::now() - max_age;
+    let mut found: Vec<_> = crate::flavors::siblings(saved_variables)
+        .into_iter()
+        .flat_map(|flavor| {
+            let name = flavor.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            fs::read_dir(flavor.join("Logs"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| {
+                    let file = e.file_name().to_string_lossy().to_string();
+                    file.starts_with("WoWCombatLog") && file.ends_with(".txt")
+                })
+                .filter_map(move |e| {
+                    let meta = e.metadata().ok()?;
+                    Some((e.path(), name.clone(), meta.modified().ok()?, meta.len()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|(_, _, modified, _)| *modified > since)
+        .collect();
+    found.sort_by(|a, b| b.2.cmp(&a.2));
+    found
 }
 
 /// Journal le plus récent, s'il a été écrit dans les 12 dernières heures.
-fn newest(dir: &Path) -> Option<PathBuf> {
-    let recent = SystemTime::now() - Duration::from_secs(12 * 3600);
-    fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            name.starts_with("WoWCombatLog") && name.ends_with(".txt")
+fn newest(saved_variables: &Path) -> Option<PathBuf> {
+    logs(saved_variables, Duration::from_secs(12 * 3600)).into_iter().next().map(|(path, ..)| path)
+}
+
+/// Journaux des 30 derniers jours, pour un envoi à la main.
+pub fn recent_logs(saved_variables: &Path) -> Vec<LogFile> {
+    logs(saved_variables, Duration::from_secs(30 * 86400))
+        .into_iter()
+        .map(|(path, flavor, modified, size)| LogFile {
+            path: path.to_string_lossy().to_string(),
+            flavor,
+            modified: modified.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0),
+            size,
         })
-        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
-        .filter(|(_, modified)| *modified > recent)
-        .max_by_key(|(_, modified)| *modified)
-        .map(|(path, _)| path)
+        .collect()
+}
+
+/// Tous les combats de boss d'un journal, lu ligne à ligne (il peut être très gros).
+pub fn read_all(path: &Path) -> Result<Vec<Encounter>, String> {
+    let file = fs::File::open(path).map_err(|e| format!("Journal illisible : {e}"))?;
+    let mut reader = BufReader::with_capacity(1 << 20, file);
+    let mut parser = Parser::default();
+    let mut found = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                if let Some(encounter) = parser.feed(String::from_utf8_lossy(&line).trim_end()) {
+                    found.push(encounter);
+                }
+            }
+            Err(e) => return Err(format!("Journal illisible : {e}")),
+        }
+    }
+    Ok(found)
+}
+
+/// Envoie chaque combat d'un journal ; renvoie le compte rendu à afficher.
+pub fn send_file(site: &str, token: &str, path: &Path) -> Result<String, String> {
+    let encounters = read_all(path)?;
+    if encounters.is_empty() {
+        return Ok("Aucun combat de boss dans ce journal.".into());
+    }
+    let (mut created, mut known) = (0, 0);
+    for encounter in &encounters {
+        match api::upload_encounter(site, token, encounter)? {
+            done if done.created => created += 1,
+            _ => known += 1,
+        }
+    }
+    Ok(format!(
+        "{} combat{} de boss dans ce journal : {} envoyé{}{}.",
+        encounters.len(),
+        if encounters.len() > 1 { "s" } else { "" },
+        created,
+        if created > 1 { "s" } else { "" },
+        if known > 0 { format!(", {known} déjà sur le site") } else { String::new() }
+    ))
 }
 
 struct Reader {
@@ -344,6 +425,7 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
         let mut pending: Vec<Encounter> = Vec::new();
         let mut marker: Option<(String, bool, bool)> = None;
         let mut tick: u32 = 0;
+        let mut warned: Option<String> = None;
         loop {
             thread::sleep(Duration::from_secs(5));
             tick = tick.wrapping_add(1);
@@ -363,10 +445,14 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
                     let _ = crate::addon::write_standings(Path::new(&settings.saved_variables), &standings.code);
                 }
             }
+            // Toutes les minutes : a-t-on joué dans une autre version du jeu (Bêta, Stress Test…) ?
+            if settings.ready() && tick % 12 == 0 {
+                follow(&app, &state, &config_dir, &mut warned);
+            }
             if !settings.ready() || !settings.upload_combat_logs {
                 continue;
             }
-            let Some(path) = logs_dir(Path::new(&settings.saved_variables)).and_then(|dir| newest(&dir)) else { continue };
+            let Some(path) = newest(Path::new(&settings.saved_variables)) else { continue };
             if reader.as_ref().map_or(true, |r| r.path != path) {
                 reader = Some(Reader { path, offset: 0, rest: String::new(), parser: Parser::default() });
             }
@@ -404,6 +490,41 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
             }
             pending.truncate(50);
         }
+    });
+}
+
+/// Suit la version du jeu où l'on vient de jouer, si l'addon Symposium y est installé :
+/// la fiche, la mise à jour de l'addon et le journal de combat automatique y passent.
+fn follow(app: &AppHandle, state: &Shared, config_dir: &Path, warned: &mut Option<String>) {
+    let current = state.lock().unwrap().saved_variables.clone();
+    let Some(played) = crate::flavors::played_elsewhere(Path::new(&current)) else { return };
+    let label = crate::flavors::label(&played.flavor);
+    if !played.has_addon {
+        // Rien à suivre sans l'addon : on le signale une fois.
+        if warned.as_deref() != Some(played.flavor.as_str()) {
+            *warned = Some(played.flavor.clone());
+            let _ = app
+                .notification()
+                .builder()
+                .title("Symposium")
+                .body(format!("Tu as joué sur {label}, où l’addon Symposium n’est pas installé : installe-le dans ce dossier, Symposium le suivra tout seul."))
+                .show();
+        }
+        return;
+    }
+    {
+        let mut s = state.lock().unwrap();
+        s.saved_variables = played.saved_variables.to_string_lossy().to_string();
+        s.last_export_at = None;
+        let _ = s.save(config_dir);
+    }
+    let message = format!("Tu joues maintenant sur {label} : Symposium suit ce dossier (fiche, addon, journal de combat). Fais /reload en jeu.");
+    let _ = app.notification().builder().title("Symposium").body(&message).show();
+    save(app, state, config_dir, SyncReport { at: chrono::Utc::now().timestamp(), ok: true, message, character: None, url: None, export_at: None });
+    let _ = app.emit("settings", ());
+    let app = app.clone();
+    thread::spawn(move || {
+        let _ = crate::update::update_addon(&app, false);
     });
 }
 
@@ -462,6 +583,16 @@ mod tests {
         let mut parser = Parser::default();
         let outside = LOG.lines().filter(|l| !l.contains("ENCOUNTER_"));
         assert!(outside.filter_map(|l| parser.feed(l)).next().is_none());
+    }
+
+    #[test]
+    fn lit_un_journal_entier_depuis_le_disque() {
+        let path = std::env::temp_dir().join(format!("WoWCombatLog-test-{}.txt", std::process::id()));
+        fs::write(&path, LOG).unwrap();
+        let encounters = read_all(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        assert_eq!(encounters.len(), 1);
+        assert_eq!(encounters[0].name, "Grub");
     }
 
     /// Un vrai journal (COMBATLOG=chemin) : aucune ligne ne doit faire échouer la lecture.
