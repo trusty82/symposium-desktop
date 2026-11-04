@@ -15,6 +15,10 @@ const ADDON_EVERY: Duration = Duration::from_secs(10 * 60);
 
 /// Renvoie la version installée, ou None si l'application est déjà à jour.
 pub async fn check_and_install(app: &AppHandle) -> Result<Option<String>, String> {
+    // Version du Microsoft Store : c'est le Store qui la met à jour.
+    if cfg!(feature = "store") {
+        return Ok(None);
+    }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| format!("Recherche de mise à jour impossible : {e}"))? else {
         return Ok(None);

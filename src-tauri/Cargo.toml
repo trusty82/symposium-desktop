@@ -35,6 +35,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[features]
+# Version du Microsoft Store (paquet MSIX) : mises à jour par le Store, démarrage avec Windows réglé par Windows.
+store = []
+
 [profile.release]
 codegen-units = 1
 lto = true
