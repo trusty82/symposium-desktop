@@ -28,6 +28,10 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
 - Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).
+- Version Microsoft Store (0.11.2) : paquet MSIX (`src-tauri/msix/AppxManifest.xml`, job `store`
+  du workflow Release, identité de Partner Center dans les variables du dépôt), signé par le
+  Store. Compilée avec `--features store` : mises à jour par le Store, démarrage avec Windows
+  dans Paramètres › Applications › Démarrage.
 - Tourne dans la zone de notification (fermer la fenêtre la cache), peut se lancer au démarrage
   de Windows (en arrière-plan), une seule instance à la fois.
 
