@@ -27,6 +27,8 @@ export interface Ctx {
     candidates: Candidate[];
     version: string;
     autostart: boolean;
+    /** Version du Microsoft Store : mises à jour par le Store, démarrage avec Windows dans ses Paramètres. */
+    store: boolean;
     busy: string | null;
     activity: Activity[];
     ready: boolean;
@@ -59,6 +61,7 @@ export default function App() {
     const [candidates, setCandidates] = useState<Candidate[]>([]);
     const [version, setVersion] = useState('');
     const [autostart, setAutostart] = useState(false);
+    const [store, setStore] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
     const [activity, setActivity] = useState<Activity[]>([]);
     const [toasts, setToasts] = useState<Toast[]>([]);
@@ -86,6 +89,7 @@ export default function App() {
         });
         invoke<Candidate[]>('detect_saved_variables').then(setCandidates);
         isEnabled().then(setAutostart).catch(() => {});
+        invoke<boolean>('store_build').then(setStore).catch(() => {});
         getVersion().then(setVersion);
         refreshAddon();
         // Envois faits en arrière-plan (fin de partie, fin de combat de boss).
@@ -148,6 +152,7 @@ export default function App() {
         candidates,
         version,
         autostart,
+        store,
         busy,
         activity,
         ready,
@@ -236,7 +241,7 @@ export default function App() {
         { id: 'sync', label: 'Envoyer ma fiche maintenant', icon: 'send', run: ctx.syncNow, disabled: !ready },
         { id: 'addon', label: 'Mettre à jour l’addon', icon: 'addon', run: ctx.updateAddon, disabled: !addon?.updateAvailable },
         { id: 'epgp', label: 'Récupérer le classement EPGP maintenant', icon: 'refresh', run: ctx.refreshStandings, disabled: !ready },
-        { id: 'update', label: 'Rechercher une mise à jour de Symposium', icon: 'refresh', run: ctx.checkUpdate },
+        ...(store ? [] : [{ id: 'update', label: 'Rechercher une mise à jour de Symposium', icon: 'refresh', run: ctx.checkUpdate } as Command]),
         { id: 'site', label: 'Ouvrir le site de la guilde', icon: 'external', run: () => ctx.open(site) },
         { id: 'profil', label: 'Ouvrir mon profil (jeton)', icon: 'external', run: () => ctx.open(`${site}/profil#application`) },
         { id: 'calendar', label: 'Ouvrir le calendrier des sorties', icon: 'external', run: () => ctx.open(`${site}/calendrier`) },

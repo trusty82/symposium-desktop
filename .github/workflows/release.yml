@@ -1,7 +1,8 @@
 name: Release
 
-# Construit l'application pour Windows (installeur NSIS) et Mac (universelle :
-# Apple Silicon et Intel, .dmg), sans certificat de signature :
+# Construit l'application pour Windows (installeur NSIS, et paquet MSIX pour le
+# Microsoft Store) et Mac (universelle : Apple Silicon et Intel, .dmg), sans certificat
+# de signature :
 # - à chaque tag v* (ex. v0.4.0) : Release GitHub avec les installeurs et latest.json
 #   (mise à jour automatique des applications installées, Windows et Mac) ;
 # - à la demande (onglet Actions > Run workflow) : installeurs gardés comme artefacts.
@@ -44,6 +45,54 @@ jobs:
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/*-setup.exe.sig
 
+  # Paquet MSIX pour le Microsoft Store (signé par le Store), en plus de l'installeur NSIS.
+  # Il attend l'identité du produit de Partner Center dans les variables du dépôt
+  # (Settings > Secrets and variables > Actions > Variables) : MSIX_IDENTITY_NAME,
+  # MSIX_PUBLISHER, MSIX_PUBLISHER_DISPLAY_NAME, MSIX_DISPLAY_NAME. Sans elles, il est sauté.
+  store:
+    if: vars.MSIX_IDENTITY_NAME != ''
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Application (version Store)
+        run: npx tauri build --no-bundle --features store
+      - name: Paquet MSIX
+        shell: pwsh
+        env:
+          IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+          DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force pkg/Assets, out | Out-Null
+          Copy-Item src-tauri/target/release/symposium-desktop.exe pkg/Symposium.exe
+          foreach ($icon in 'StoreLogo', 'Square44x44Logo', 'Square150x150Logo') { Copy-Item "src-tauri/icons/$icon.png" pkg/Assets/ }
+          # Le Store veut quatre nombres, le dernier à 0.
+          (Get-Content src-tauri/msix/AppxManifest.xml -Raw) `
+            -replace '__IDENTITY_NAME__', $env:IDENTITY_NAME `
+            -replace '__PUBLISHER_DISPLAY_NAME__', $env:PUBLISHER_DISPLAY_NAME `
+            -replace '__PUBLISHER__', $env:PUBLISHER `
+            -replace '__DISPLAY_NAME__', $env:DISPLAY_NAME `
+            -replace '__VERSION__', "$version.0" | Set-Content pkg/AppxManifest.xml -Encoding utf8
+          $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' | Sort-Object FullName | Select-Object -Last 1
+          & $makeappx.FullName pack /d pkg /p "out/Symposium_${version}_x64.msix" /o
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store
+          path: out/*.msix
+
   mac:
     runs-on: macos-latest
     steps:
@@ -76,8 +125,9 @@ jobs:
           path: out/*
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, mac]
+    # Le paquet du Store peut être sauté (pas encore d'identité) : la Release se fait quand même.
+    if: startsWith(github.ref, 'refs/tags/v') && !failure() && !cancelled()
+    needs: [windows, mac, store]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

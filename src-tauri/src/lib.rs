@@ -131,6 +131,12 @@ async fn send_log(path: String, state: State<'_, Shared>) -> Result<String, Stri
         .map_err(|e| e.to_string())?
 }
 
+/// Version du Microsoft Store (MSIX) : pas de mise à jour ni de démarrage avec Windows réglés par l'application.
+#[tauri::command]
+fn store_build() -> bool {
+    cfg!(feature = "store")
+}
+
 /// Recherche une mise à jour tout de suite ; l'installe s'il y en a une.
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<String>, String> {
@@ -196,7 +202,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log, store_build])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

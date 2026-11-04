@@ -10,25 +10,40 @@ export default function SettingsPage({ ctx }: { ctx: Ctx }) {
             <header className="page-head">
                 <p className="eyebrow">Réglages</p>
                 <h1>Symposium</h1>
-                <p className="lead">Version {ctx.version}, mise à jour toute seule.</p>
+                <p className="lead">
+                    Version {ctx.version}, {ctx.store ? 'mise à jour par le Microsoft Store.' : 'mise à jour toute seule.'}
+                </p>
             </header>
 
             <section className="panel">
-                <Switch
-                    checked={ctx.autostart}
-                    onChange={ctx.toggleAutostart}
-                    label={`Lancer Symposium au démarrage ${mac ? 'du Mac' : 'de Windows'}`}
-                    hint="Discret : il démarre dans la barre, sans ouvrir de fenêtre."
-                />
+                {ctx.store ? (
+                    // Installé par le Store : Windows seul peut le lancer au démarrage.
+                    <p className="dim">
+                        Pour lancer Symposium au démarrage de Windows : Paramètres Windows › Applications › Démarrage, active Symposium.
+                    </p>
+                ) : (
+                    <Switch
+                        checked={ctx.autostart}
+                        onChange={ctx.toggleAutostart}
+                        label={`Lancer Symposium au démarrage ${mac ? 'du Mac' : 'de Windows'}`}
+                        hint="Discret : il démarre dans la barre, sans ouvrir de fenêtre."
+                    />
+                )}
             </section>
 
             <section className="panel">
                 <h2>Mises à jour</h2>
-                <p className="dim">Je vérifie au lancement puis toutes les 6 heures, et je m’installe tout seul.</p>
+                <p className="dim">
+                    {ctx.store
+                        ? 'Le Microsoft Store installe les nouvelles versions de Symposium.'
+                        : 'Je vérifie au lancement puis toutes les 6 heures, et je m’installe tout seul.'}
+                </p>
                 <div className="row">
-                    <button type="button" className="btn primary" onClick={ctx.checkUpdate} disabled={Boolean(ctx.busy)}>
-                        <Icon name="refresh" size={18} /> Rechercher maintenant
-                    </button>
+                    {!ctx.store && (
+                        <button type="button" className="btn primary" onClick={ctx.checkUpdate} disabled={Boolean(ctx.busy)}>
+                            <Icon name="refresh" size={18} /> Rechercher maintenant
+                        </button>
+                    )}
                     <button type="button" className="btn ghost" onClick={() => ctx.open(ctx.site)}>
                         <Icon name="external" size={18} /> Site de la guilde
                     </button>
