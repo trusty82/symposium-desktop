@@ -19,6 +19,10 @@ use tauri_plugin_notification::NotificationExt;
 
 /// Derniers coups reçus gardés pour expliquer une mort.
 const RECAP: usize = 5;
+/// Largeur des tranches de la courbe des dégâts et des soins, en secondes.
+const BUCKET: f64 = 5.0;
+/// Sorts lancés gardés au plus par combat (un raid de 40 sur dix minutes en lance moins).
+const MAX_CASTS: usize = 15_000;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +38,82 @@ pub struct Encounter {
     pub success: bool,
     pub players: Vec<PlayerStats>,
     pub deaths: Vec<Death>,
+    pub detail: Detail,
+}
+
+/// Le détail du combat : sorts de chaque joueur, courbe, et sorts lancés dans l'ordre.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Detail {
+    /// Largeur des tranches de la courbe, en secondes.
+    pub bucket: f64,
+    pub players: Vec<PlayerDetail>,
+    pub casts: Vec<Cast>,
+}
+
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerDetail {
+    pub name: String,
+    pub spells: Vec<SpellStats>,
+    /// Dégâts, puis soins utiles (absorptions comprises), par tranche de BUCKET secondes.
+    pub damage: Vec<u64>,
+    pub healing: Vec<u64>,
+}
+
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpellStats {
+    /// 0 pour la mêlée.
+    pub id: i64,
+    pub name: String,
+    pub heal: bool,
+    /// Lancé par le familier du joueur.
+    pub pet: bool,
+    /// Dégâts, ou soins utiles.
+    pub amount: u64,
+    pub overhealing: u64,
+    pub hits: u32,
+    pub crits: u32,
+}
+
+/// Sort lancé par un joueur du groupe, ou par le boss et ses adds (début d'incantation compris).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Cast {
+    /// Secondes depuis le début du combat.
+    pub at: f64,
+    pub source: String,
+    pub spell_id: i64,
+    pub spell: String,
+    pub target: String,
+    pub hostile: bool,
+    /// Début d'incantation (le sort part ensuite, ou est interrompu).
+    pub start: bool,
+}
+
+/// Ce qu'un joueur a fait pendant le combat, en cours de lecture.
+#[derive(Default)]
+struct Tally {
+    spells: HashMap<(i64, String, bool, bool), SpellStats>,
+    damage: Vec<u64>,
+    healing: Vec<u64>,
+}
+
+impl Tally {
+    fn add(&mut self, elapsed: f64, (id, name): (i64, String), heal: bool, pet: bool, amount: u64, over: u64, crit: bool) {
+        let spell = self.spells.entry((id, name.clone(), heal, pet)).or_insert_with(|| SpellStats { id, name, heal, pet, ..Default::default() });
+        spell.amount += amount;
+        spell.overhealing += over;
+        spell.hits += 1;
+        spell.crits += crit as u32;
+        let series = if heal { &mut self.healing } else { &mut self.damage };
+        let slot = (elapsed.max(0.0) / BUCKET) as usize;
+        if series.len() <= slot {
+            series.resize(slot + 1, 0);
+        }
+        series[slot] += amount;
+    }
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -75,6 +155,8 @@ struct Fight {
     players: HashMap<String, PlayerStats>,
     recent: HashMap<String, VecDeque<Hit>>,
     deaths: Vec<Death>,
+    tallies: HashMap<String, Tally>,
+    casts: Vec<Cast>,
 }
 
 #[derive(Default)]
@@ -138,6 +220,20 @@ fn timestamp(text: &str) -> Option<f64> {
     Some(local.timestamp_millis() as f64 / 1000.0)
 }
 
+/// Personnage hostile (le boss, ses adds).
+fn hostile(flags: &str) -> bool {
+    u32::from_str_radix(flags.trim_start_matches("0x"), 16).map_or(false, |f| f & 0x40 != 0)
+}
+
+/// Critique : « 1 » dans le journal, « nil » sinon.
+fn crit(field: Option<&String>) -> bool {
+    field.is_some_and(|v| v == "1")
+}
+
+fn spell_of(f: &[String]) -> (i64, String) {
+    (f.get(9).and_then(|v| v.parse().ok()).unwrap_or(0), f.get(10).cloned().unwrap_or_default())
+}
+
 fn num(field: Option<&String>) -> u64 {
     field.and_then(|f| f.parse::<f64>().ok()).filter(|v| *v > 0.0).map_or(0, |v| v as u64)
 }
@@ -162,6 +258,8 @@ impl Parser {
                     players: HashMap::new(),
                     recent: HashMap::new(),
                     deaths: Vec::new(),
+                    tallies: HashMap::new(),
+                    casts: Vec::new(),
                 });
             }
             "ENCOUNTER_END" => {
@@ -171,6 +269,20 @@ impl Parser {
                 }
                 let fight = self.fight.take()?;
                 let success = f.get(5).map(|v| v == "1").unwrap_or(false);
+                let name_of = |guid: &String, known: &str| {
+                    if known.is_empty() { self.names.get(guid).cloned().unwrap_or_else(|| "Inconnu".into()) } else { known.to_string() }
+                };
+                let mut details: Vec<PlayerDetail> = fight
+                    .tallies
+                    .into_iter()
+                    .map(|(guid, t)| {
+                        let mut spells: Vec<SpellStats> = t.spells.into_values().collect();
+                        spells.sort_by(|a, b| b.amount.cmp(&a.amount));
+                        let known = fight.players.get(&guid).map(|p| p.name.clone()).unwrap_or_default();
+                        PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing }
+                    })
+                    .collect();
+                details.sort_by_key(|d| std::cmp::Reverse(d.damage.iter().sum::<u64>()));
                 let mut players: Vec<PlayerStats> = fight
                     .players
                     .into_iter()
@@ -193,6 +305,7 @@ impl Parser {
                     success,
                     players,
                     deaths: fight.deaths,
+                    detail: Detail { bucket: BUCKET, players: details, casts: fight.casts },
                 });
             }
             _ => {}
@@ -241,7 +354,10 @@ impl Parser {
                 let amount = num(f.get(f.len().checked_sub(10)?));
                 if !is_player(dst) {
                     if let Some((guid, name)) = credited(src, src_name, src_flags) {
-                        stats(&mut fight.players, guid, name).damage += amount;
+                        stats(&mut fight.players, guid.clone(), name).damage += amount;
+                        let spell = if event == "SWING_DAMAGE" { (0, "Mêlée".to_string()) } else { spell_of(&f) };
+                        let critical = crit(f.get(f.len() - 3));
+                        fight.tallies.entry(guid).or_default().add(elapsed, spell, false, !is_player(src), amount, 0, critical);
                     }
                 } else if grouped(dst_flags) {
                     stats(&mut fight.players, dst.clone(), short(dst_name)).damage_taken += amount;
@@ -257,9 +373,11 @@ impl Parser {
                 let amount = num(f.get(f.len().checked_sub(5)?));
                 let over = num(f.get(f.len().checked_sub(3)?));
                 if let Some((guid, name)) = credited(src, src_name, src_flags) {
-                    let s = stats(&mut fight.players, guid, name);
+                    let s = stats(&mut fight.players, guid.clone(), name);
                     s.healing += amount.saturating_sub(over);
                     s.overhealing += over;
+                    let critical = crit(f.last());
+                    fight.tallies.entry(guid).or_default().add(elapsed, spell_of(&f), true, !is_player(src), amount.saturating_sub(over), over, critical);
                 }
             }
             "SPELL_ABSORBED" => {
@@ -267,9 +385,23 @@ impl Parser {
                 let n = f.len();
                 if n >= 18 {
                     let (guid, name, flags) = (&f[n - 10], &f[n - 9], &f[n - 8]);
+                    let pet = !is_player(guid);
                     if let Some((guid, name)) = credited(guid, name, flags) {
-                        stats(&mut fight.players, guid, name).absorbs += num(f.get(n - 3));
+                        let amount = num(f.get(n - 3));
+                        stats(&mut fight.players, guid.clone(), name).absorbs += amount;
+                        let spell = (f[n - 6].parse().unwrap_or(0), f[n - 5].clone());
+                        fight.tallies.entry(guid).or_default().add(elapsed, spell, true, pet, amount, 0, crit(f.get(n - 1)));
                     }
+                }
+            }
+            "SPELL_CAST_SUCCESS" | "SPELL_CAST_START" if fight.casts.len() < MAX_CASTS => {
+                // Joueurs : le sort parti seulement ; boss et adds : aussi le début de l'incantation, à surveiller.
+                let player = is_player(src) && grouped(src_flags) && event == "SPELL_CAST_SUCCESS";
+                let enemy = !is_player(src) && !pets.contains_key(src) && hostile(src_flags) && src_name != "nil";
+                if player || enemy {
+                    let (spell_id, spell) = spell_of(&f);
+                    let target = if dst_name == "nil" { String::new() } else { short(dst_name) };
+                    fight.casts.push(Cast { at: elapsed, source: short(src_name), spell_id, spell, target, hostile: enemy, start: event == "SPELL_CAST_START" });
                 }
             }
             "UNIT_DIED" if is_player(dst) && grouped(dst_flags) => {
@@ -548,6 +680,10 @@ mod tests {
 10/9/2026 07:53:26.3292  SPELL_DAMAGE,Player-4620-008EF1C4,"Lame-ClassicBetaPvE2-",0x511,0x80000000,Creature-0-4615-0-6503-1417-0000487521,"Jeune crocilisque des Paluns",0x10a48,0x80000000,1759,"Attaque pernicieuse",0x1,Creature-0-4615-0-6503-1417-0000487521,0000000000000000,599,691,74,0,897,0,0,0,1,0,0,0,-3177.48,-1756.39,1437,6.0284,21,48,63,-1,1,0,0,0,nil,nil,nil,ST
 10/9/2026 07:53:26.5000  SPELL_DAMAGE,Player-4620-00000001,"Etranger-ClassicBetaPvE2-",0x548,0x80000000,Creature-0-4615-0-6503-1417-0000487521,"Jeune crocilisque des Paluns",0x10a48,0x80000000,1759,"Attaque pernicieuse",0x1,Creature-0-4615-0-6503-1417-0000487521,0000000000000000,599,691,74,0,897,0,0,0,1,0,0,0,-3177.48,-1756.39,1437,6.0284,21,999,999,-1,1,0,0,0,nil,nil,nil,ST
 10/9/2026 07:53:30.0000  SWING_DAMAGE,Creature-0-4615-0-6503-1040-0000487CC3,"Rampant des tourbières",0xa48,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,Creature-0-4615-0-6503-1040-0000487CC3,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,40,45,-1,1,0,0,0,nil,nil,nil
+10/9/2026 07:53:27.0000  SPELL_CAST_SUCCESS,Player-4620-008EF1C4,"Lame-ClassicBetaPvE2-",0x511,0x80000000,Creature-0-4615-0-6503-1417-0000487521,"Jeune crocilisque des Paluns",0x10a48,0x80000000,1759,"Attaque pernicieuse",0x1,Player-4620-008EF1C4,0000000000000000,599,691,74,0,897,0,0,0,1,0,0,0,-3177.48,-1756.39,1437,6.0284,21
+10/9/2026 07:53:28.0000  SPELL_DAMAGE,Player-4620-008EF1C4,"Lame-ClassicBetaPvE2-",0x511,0x80000000,Creature-0-4615-0-6503-1417-0000487521,"Jeune crocilisque des Paluns",0x10a48,0x80000000,1759,"Attaque pernicieuse",0x1,Creature-0-4615-0-6503-1417-0000487521,0000000000000000,599,691,74,0,897,0,0,0,1,0,0,0,-3177.48,-1756.39,1437,6.0284,21,96,126,-1,1,0,0,0,1,nil,nil,ST
+10/9/2026 07:53:29.0000  SPELL_CAST_START,Creature-0-4615-0-6503-1040-0000487CC3,"Rampant des tourbières",0xa48,0x80000000,0000000000000000,nil,0x80000000,0x80000000,5678,"Morsure",0x1
+10/9/2026 07:53:29.5000  SPELL_CAST_START,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,0000000000000000,nil,0x80000000,0x80000000,2050,"Soins inférieurs",0x2
 10/9/2026 07:53:47.1982  SPELL_ABSORBED,Creature-0-4615-0-6503-1040-0000487CC3,"Rampant des tourbières",0xa48,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,3747,"Mot de pouvoir : Bouclier",0x2,31,35,nil
 10/9/2026 07:53:48.0000  SPELL_HEAL,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,2050,"Soins inférieurs",0x2,Player-4620-01548E6A,0000000000000000,800,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,120,120,20,0,nil
 10/9/2026 07:53:50.0000  SPELL_DAMAGE,Creature-0-4615-0-6503-1040-0000487CC3,"Rampant des tourbières",0xa48,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,5678,"Morsure",0x1,Creature-0-4615-0-6503-1040-0000487CC3,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,900,900,37,1,0,0,0,nil,nil,nil,ST
@@ -566,7 +702,7 @@ mod tests {
         let by = |name: &str| e.players.iter().find(|p| p.name == name).cloned().unwrap_or_default();
         // Familier compté à son maître (nom inconnu tant qu'il n'a rien fait lui-même) ; coup « LANDED » pas compté deux fois.
         assert_eq!(e.players.iter().find(|p| p.damage == 32).map(|p| p.name.as_str()), Some("Inconnu"));
-        assert_eq!(by("Lame").damage, 48);
+        assert_eq!(by("Lame").damage, 144);
         // Un joueur hors du groupe n'est pas compté.
         assert!(e.players.iter().all(|p| p.name != "Etranger"));
 
@@ -576,6 +712,25 @@ mod tests {
         assert_eq!(e.deaths.len(), 1);
         assert_eq!(e.deaths[0].hits.last().map(|h| (h.spell.as_str(), h.amount)), Some(("Morsure", 900)));
         assert_eq!(e.deaths[0].hits[0].spell, "Mêlée");
+
+        // Détail : sorts de chaque joueur, avec les critiques, courbe par tranches de 5 s, sorts lancés.
+        let detail = |name: &str| e.detail.players.iter().find(|p| p.name == name).cloned().unwrap();
+        let lame = detail("Lame");
+        assert_eq!(lame.spells.len(), 1);
+        assert_eq!((lame.spells[0].id, lame.spells[0].amount, lame.spells[0].hits, lame.spells[0].crits), (1759, 144, 2, 1));
+        // Coups à 14,3 s et 16 s du début : troisième et quatrième tranches.
+        assert_eq!(lame.damage, vec![0, 0, 48, 96]);
+        let pet = e.detail.players.iter().find(|p| p.spells.iter().any(|s| s.pet)).unwrap();
+        assert_eq!((pet.spells[0].name.as_str(), pet.spells[0].amount), ("Mêlée", 32));
+        let soin = detail("Soin");
+        let heal = |n: &str| soin.spells.iter().find(|s| s.name == n).cloned().unwrap();
+        assert_eq!((heal("Soins inférieurs").amount, heal("Soins inférieurs").overhealing), (100, 20));
+        assert!(heal("Mot de pouvoir : Bouclier").heal);
+        assert_eq!(soin.healing.iter().sum::<u64>(), 131);
+        let casts: Vec<(&str, &str, bool, bool)> =
+            e.detail.casts.iter().map(|c| (c.source.as_str(), c.spell.as_str(), c.hostile, c.start)).collect();
+        assert_eq!(casts, vec![("Lame", "Attaque pernicieuse", false, false), ("Rampant des tourbières", "Morsure", true, true)]);
+        assert_eq!(e.detail.casts[0].target, "Jeune crocilisque des Paluns");
     }
 
     #[test]
