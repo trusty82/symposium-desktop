@@ -49,6 +49,20 @@ pub struct Detail {
     pub bucket: f64,
     pub players: Vec<PlayerDetail>,
     pub casts: Vec<Cast>,
+    /// Dégâts subis par le groupe, par sort (0.12.1).
+    pub taken: Vec<Taken>,
+}
+
+/// Ce qui a frappé le groupe : un sort (ou la mêlée) et qui l'a lancé.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Taken {
+    /// 0 pour la mêlée.
+    pub id: i64,
+    pub name: String,
+    pub source: String,
+    pub amount: u64,
+    pub hits: u32,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -56,9 +70,10 @@ pub struct Detail {
 pub struct PlayerDetail {
     pub name: String,
     pub spells: Vec<SpellStats>,
-    /// Dégâts, puis soins utiles (absorptions comprises), par tranche de BUCKET secondes.
+    /// Dégâts, soins utiles (absorptions comprises) et dégâts subis, par tranche de BUCKET secondes.
     pub damage: Vec<u64>,
     pub healing: Vec<u64>,
+    pub taken: Vec<u64>,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -98,6 +113,16 @@ struct Tally {
     spells: HashMap<(i64, String, bool, bool), SpellStats>,
     damage: Vec<u64>,
     healing: Vec<u64>,
+    taken: Vec<u64>,
+}
+
+/// Ajoute un montant à la tranche du moment.
+fn slot(series: &mut Vec<u64>, elapsed: f64, amount: u64) {
+    let i = (elapsed.max(0.0) / BUCKET) as usize;
+    if series.len() <= i {
+        series.resize(i + 1, 0);
+    }
+    series[i] += amount;
 }
 
 impl Tally {
@@ -107,12 +132,7 @@ impl Tally {
         spell.overhealing += over;
         spell.hits += 1;
         spell.crits += crit as u32;
-        let series = if heal { &mut self.healing } else { &mut self.damage };
-        let slot = (elapsed.max(0.0) / BUCKET) as usize;
-        if series.len() <= slot {
-            series.resize(slot + 1, 0);
-        }
-        series[slot] += amount;
+        slot(if heal { &mut self.healing } else { &mut self.damage }, elapsed, amount);
     }
 }
 
@@ -157,6 +177,7 @@ struct Fight {
     deaths: Vec<Death>,
     tallies: HashMap<String, Tally>,
     casts: Vec<Cast>,
+    taken: HashMap<(i64, String), Taken>,
 }
 
 #[derive(Default)]
@@ -260,6 +281,7 @@ impl Parser {
                     deaths: Vec::new(),
                     tallies: HashMap::new(),
                     casts: Vec::new(),
+                    taken: HashMap::new(),
                 });
             }
             "ENCOUNTER_END" => {
@@ -279,10 +301,12 @@ impl Parser {
                         let mut spells: Vec<SpellStats> = t.spells.into_values().collect();
                         spells.sort_by(|a, b| b.amount.cmp(&a.amount));
                         let known = fight.players.get(&guid).map(|p| p.name.clone()).unwrap_or_default();
-                        PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing }
+                        PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing, taken: t.taken }
                     })
                     .collect();
                 details.sort_by_key(|d| std::cmp::Reverse(d.damage.iter().sum::<u64>()));
+                let mut taken: Vec<Taken> = fight.taken.into_values().collect();
+                taken.sort_by(|a, b| b.amount.cmp(&a.amount));
                 let mut players: Vec<PlayerStats> = fight
                     .players
                     .into_iter()
@@ -305,7 +329,7 @@ impl Parser {
                     success,
                     players,
                     deaths: fight.deaths,
-                    detail: Detail { bucket: BUCKET, players: details, casts: fight.casts },
+                    detail: Detail { bucket: BUCKET, players: details, casts: fight.casts, taken },
                 });
             }
             _ => {}
@@ -361,7 +385,11 @@ impl Parser {
                     }
                 } else if grouped(dst_flags) {
                     stats(&mut fight.players, dst.clone(), short(dst_name)).damage_taken += amount;
-                    let spell = if event == "SWING_DAMAGE" { "Mêlée".to_string() } else { f.get(10).cloned().unwrap_or_default() };
+                    let (id, spell) = if event == "SWING_DAMAGE" { (0, "Mêlée".to_string()) } else { spell_of(&f) };
+                    slot(&mut fight.tallies.entry(dst.clone()).or_default().taken, elapsed, amount);
+                    let by = fight.taken.entry((id, spell.clone())).or_insert_with(|| Taken { id, name: spell.clone(), source: short(src_name), ..Default::default() });
+                    by.amount += amount;
+                    by.hits += 1;
                     let recent = fight.recent.entry(dst.clone()).or_default();
                     recent.push_back(Hit { at: elapsed, source: short(src_name), spell, amount });
                     if recent.len() > RECAP {
@@ -731,6 +759,10 @@ mod tests {
             e.detail.casts.iter().map(|c| (c.source.as_str(), c.spell.as_str(), c.hostile, c.start)).collect();
         assert_eq!(casts, vec![("Lame", "Attaque pernicieuse", false, false), ("Rampant des tourbières", "Morsure", true, true)]);
         assert_eq!(e.detail.casts[0].target, "Jeune crocilisque des Paluns");
+        // Dégâts subis : par sort pour le groupe, et la courbe de chacun.
+        let taken: Vec<(&str, &str, u64, u32)> = e.detail.taken.iter().map(|t| (t.name.as_str(), t.source.as_str(), t.amount, t.hits)).collect();
+        assert_eq!(taken, vec![("Morsure", "Rampant des tourbières", 900, 1), ("Mêlée", "Rampant des tourbières", 40, 1)]);
+        assert_eq!(soin.taken.iter().sum::<u64>(), 940);
     }
 
     #[test]
