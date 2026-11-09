@@ -27,7 +27,7 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   jours (« Anciens journaux »). Détail de chaque combat (0.12.0) : sorts de chaque joueur
   (dégâts, soins, coups, critiques), courbe par tranches de 5 s, sorts lancés par les joueurs, le
   boss et ses adds ; renvoyer un ancien journal complète un combat déjà sur le site. Dégâts subis par
-  sort et courbe des dégâts subis (0.12.1).
+  sort et courbe des dégâts subis (0.12.1). École de magie de chaque sort lancé (0.12.2), pour la frise.
 - Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).
