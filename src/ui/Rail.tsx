@@ -4,6 +4,7 @@ import Icon, { type IconName } from './Icon';
 
 const ITEMS: { page: Page; label: string; icon: IconName }[] = [
     { page: 'home', label: 'Accueil', icon: 'home' },
+    { page: 'characters', label: 'Persos', icon: 'people' },
     { page: 'link', label: 'Liaison', icon: 'link' },
     { page: 'addon', label: 'Addon', icon: 'addon' },
     { page: 'combat', label: 'Combats', icon: 'combat' },

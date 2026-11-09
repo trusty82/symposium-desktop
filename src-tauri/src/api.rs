@@ -23,6 +23,32 @@ pub struct MeCharacter {
     pub name: String,
     pub level: i64,
     pub class: String,
+    // Champs ajoutés avec la page Personnages (0.13) : absents d'un site plus ancien.
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub class_name: Option<String>,
+    #[serde(default)]
+    pub class_color: Option<String>,
+    #[serde(default)]
+    pub race_name: Option<String>,
+    #[serde(default)]
+    pub spec: Option<String>,
+    #[serde(default)]
+    pub item_level: Option<f64>,
+    /// Le préféré : celui choisi, sinon le plus avancé.
+    #[serde(default)]
+    pub main: bool,
+    /// Préféré choisi par le joueur (pas seulement le plus avancé).
+    #[serde(default)]
+    pub main_chosen: bool,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Characters {
+    pub characters: Vec<MeCharacter>,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +86,21 @@ fn error(response: Response) -> String {
 
 pub fn me(site: &str, token: &str) -> Result<Me, String> {
     let response = client().get(url(site, "/me")).bearer_auth(token.trim()).header("Accept", "application/json").send().map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
+}
+
+/// Choisit le personnage préféré du compte ; renvoie la liste mise à jour.
+pub fn set_main(site: &str, token: &str, id: i64) -> Result<Characters, String> {
+    let response = client()
+        .put(url(site, &format!("/characters/{id}/main")))
+        .bearer_auth(token.trim())
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|e| format!("Site injoignable : {e}"))?;
+    if response.status().as_u16() == 404 {
+        return Err("Personnage introuvable sur ton compte : actualise la liste.".into());
+    }
     if !response.status().is_success() { return Err(error(response)); }
     response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
 }

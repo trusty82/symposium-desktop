@@ -1223,3 +1223,62 @@ summary {
     overflow-wrap: anywhere;
     opacity: 0.75;
 }
+
+/* Personnages : une carte par personnage, le préféré en tête et souligné d'or. */
+.characters {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.character {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+.character-main {
+    border-color: var(--line-strong);
+}
+
+.character-bar {
+    align-self: stretch;
+    width: 4px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.character-body {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.character-name {
+    font-family: var(--display);
+    font-size: 1.25rem;
+}
+
+.character-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--gold-bright);
+    font-weight: 700;
+    font-size: 0.875rem;
+}

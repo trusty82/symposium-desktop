@@ -61,6 +61,27 @@ async fn test_connection(token: String, site_url: Option<String>, state: State<'
     tauri::async_runtime::spawn_blocking(move || api::me(&site, &token)).await.map_err(|e| e.to_string())?
 }
 
+/// Les personnages du compte, le préféré en tête (page Personnages).
+#[tauri::command]
+async fn my_characters(state: State<'_, Shared>) -> Result<Vec<api::MeCharacter>, String> {
+    let settings = state.lock().unwrap().clone();
+    if settings.token.trim().is_empty() {
+        return Err("Renseigne d’abord ton jeton personnel (Liaison).".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || api::me(&settings.site_url, &settings.token).map(|me| me.characters))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Choisit le personnage préféré sur le site.
+#[tauri::command]
+async fn set_main_character(id: i64, state: State<'_, Shared>) -> Result<Vec<api::MeCharacter>, String> {
+    let settings = state.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || api::set_main(&settings.site_url, &settings.token, id).map(|c| c.characters))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn sync_now(app: AppHandle, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<Option<settings::SyncReport>, String> {
     let (state, dir) = (state.inner().clone(), dir.0.clone());
@@ -202,7 +223,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log, store_build])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log, store_build, my_characters, set_main_character])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

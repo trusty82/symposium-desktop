@@ -15,6 +15,7 @@ const PATHS = {
     folder: 'M3.5 6.5h6l2 2h9v10h-17z',
     spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18',
     arrow: 'M5 12h14M13 6l6 6-6 6',
+    people: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.5-3.5 3.2-5.5 6.5-5.5s6 2 6.5 5.5M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .8 3.2 2.6 3.5 5.2',
 } as const;
 
 export type IconName = keyof typeof PATHS;
