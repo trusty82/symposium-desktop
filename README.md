@@ -28,6 +28,8 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   (dégâts, soins, coups, critiques), courbe par tranches de 5 s, sorts lancés par les joueurs, le
   boss et ses adds ; renvoyer un ancien journal complète un combat déjà sur le site. Dégâts subis par
   sort et courbe des dégâts subis (0.12.1). École de magie de chaque sort lancé (0.12.2), pour la frise.
+- Page Personnages (0.13.0) : les personnages du compte sur le site, et le choix du préféré
+  (`/api/desktop/me`, `PUT /api/desktop/characters/{id}/main`).
 - Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).

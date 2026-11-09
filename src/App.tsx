@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import './App.css';
 import { type Activity, type AddonStatus, type Candidate, type Page, type Settings, type SyncReport } from './types';
 import AddonPage from './ui/AddonPage';
+import CharactersPage from './ui/CharactersPage';
 import CombatPage from './ui/CombatPage';
 import Home from './ui/Home';
 import LinkPage from './ui/LinkPage';
@@ -246,6 +247,7 @@ export default function App() {
         { id: 'profil', label: 'Ouvrir mon profil (jeton)', icon: 'external', run: () => ctx.open(`${site}/profil#application`) },
         { id: 'calendar', label: 'Ouvrir le calendrier des sorties', icon: 'external', run: () => ctx.open(`${site}/calendrier`) },
         { id: 'go-home', label: 'Aller à l’accueil', icon: 'home', run: () => setPage('home') },
+        { id: 'go-characters', label: 'Mes personnages (choisir mon préféré)', icon: 'people', run: () => setPage('characters') },
         { id: 'go-link', label: 'Aller à la liaison (jeton, fichier)', icon: 'link', run: () => setPage('link') },
         { id: 'go-addon', label: 'Aller à l’addon', icon: 'addon', run: () => setPage('addon') },
         { id: 'go-combat', label: 'Aller aux combats', icon: 'combat', run: () => setPage('combat') },
@@ -258,6 +260,7 @@ export default function App() {
             <Rail page={page} go={setPage} ready={ready} addonAlert={Boolean(addon?.updateAvailable)} onPalette={() => setPalette(true)} />
             <main className="stage" key={page}>
                 {page === 'home' && <Home ctx={ctx} />}
+                {page === 'characters' && <CharactersPage ctx={ctx} />}
                 {page === 'link' && <LinkPage ctx={ctx} />}
                 {page === 'addon' && <AddonPage ctx={ctx} />}
                 {page === 'combat' && <CombatPage ctx={ctx} />}

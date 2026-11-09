@@ -56,7 +56,24 @@ export interface Activity {
     url?: string | null;
 }
 
-export type Page = 'home' | 'link' | 'addon' | 'combat' | 'settings';
+export type Page = 'home' | 'characters' | 'link' | 'addon' | 'combat' | 'settings';
+
+/** Un personnage du compte, tel que le site l'envoie (champs ajoutés avec la page Personnages). */
+export interface MeCharacter {
+    id: number;
+    name: string;
+    level: number;
+    class: string;
+    className: string | null;
+    classColor: string | null;
+    raceName: string | null;
+    spec: string | null;
+    itemLevel: number | null;
+    main: boolean;
+    mainChosen: boolean;
+    exportedAt?: string | null;
+    url: string | null;
+}
 
 export const FLAVORS: Record<string, string> = {
     _classic_beta_: 'WoW: Forever',
