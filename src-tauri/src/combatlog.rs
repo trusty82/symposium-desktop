@@ -105,6 +105,8 @@ pub struct Cast {
     pub hostile: bool,
     /// Début d'incantation (le sort part ensuite, ou est interrompu).
     pub start: bool,
+    /// École de magie du jeu (1 physique, 2 sacré, 4 feu, 8 nature, 16 givre, 32 ombre, 64 arcanes ; combinées), 0.12.2.
+    pub school: u32,
 }
 
 /// Ce qu'un joueur a fait pendant le combat, en cours de lecture.
@@ -429,7 +431,8 @@ impl Parser {
                 if player || enemy {
                     let (spell_id, spell) = spell_of(&f);
                     let target = if dst_name == "nil" { String::new() } else { short(dst_name) };
-                    fight.casts.push(Cast { at: elapsed, source: short(src_name), spell_id, spell, target, hostile: enemy, start: event == "SPELL_CAST_START" });
+                    let school = f.get(11).and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
+                    fight.casts.push(Cast { at: elapsed, source: short(src_name), spell_id, spell, target, hostile: enemy, start: event == "SPELL_CAST_START", school });
                 }
             }
             "UNIT_DIED" if is_player(dst) && grouped(dst_flags) => {
@@ -759,6 +762,7 @@ mod tests {
             e.detail.casts.iter().map(|c| (c.source.as_str(), c.spell.as_str(), c.hostile, c.start)).collect();
         assert_eq!(casts, vec![("Lame", "Attaque pernicieuse", false, false), ("Rampant des tourbières", "Morsure", true, true)]);
         assert_eq!(e.detail.casts[0].target, "Jeune crocilisque des Paluns");
+        assert_eq!((e.detail.casts[0].school, e.detail.casts[0].spell_id), (1, 1759));
         // Dégâts subis : par sort pour le groupe, et la courbe de chacun.
         let taken: Vec<(&str, &str, u64, u32)> = e.detail.taken.iter().map(|t| (t.name.as_str(), t.source.as_str(), t.amount, t.hits)).collect();
         assert_eq!(taken, vec![("Morsure", "Rampant des tourbières", 900, 1), ("Mêlée", "Rampant des tourbières", 40, 1)]);
