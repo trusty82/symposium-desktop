@@ -1,6 +1,7 @@
 import type { Ctx } from '../App';
 import Icon from './Icon';
 import Switch from './Switch';
+import { versionLabel } from '../version';
 
 /** L'addon Symposium : version installée, version du site, mise à jour. */
 export default function AddonPage({ ctx }: { ctx: Ctx }) {
@@ -23,17 +24,23 @@ export default function AddonPage({ ctx }: { ctx: Ctx }) {
                     <div className="versions">
                         <div className="version">
                             <small>Installé</small>
-                            <strong>{a.installed ?? '—'}</strong>
+                            <strong>{versionLabel(a.installed) ?? '—'}</strong>
                         </div>
                         <div className={`version-arrow${a.updateAvailable ? ' live' : ''}`} aria-hidden="true">
                             <Icon name="arrow" size={28} />
                         </div>
                         <div className="version">
                             <small>{a.latest?.includes('-') ? 'Bêta du site' : 'Sur le site'}</small>
-                            <strong>{a.latest ?? '—'}</strong>
+                            <strong>{versionLabel(a.latest) ?? '—'}</strong>
                         </div>
                         <p className={`version-state ${a.updateAvailable ? 'warn' : 'good'}`}>
-                            {a.updateAvailable ? 'Une mise à jour t’attend.' : a.installed ? 'Tout est à jour.' : 'Pas encore installé.'}
+                            {a.updateAvailable
+                                ? versionLabel(a.installed) === versionLabel(a.latest)
+                                    ? 'Nouvelle table des composants à installer.'
+                                    : 'Une mise à jour t’attend.'
+                                : a.installed
+                                  ? 'Tout est à jour.'
+                                  : 'Pas encore installé.'}
                         </p>
                     </div>
                 )}

@@ -2,6 +2,7 @@ import type { Ctx } from '../App';
 import logo from '../assets/logo.png';
 import { type Activity, ago } from '../types';
 import Icon, { type IconName } from './Icon';
+import { versionLabel } from '../version';
 
 type State = 'setup' | 'ok' | 'busy' | 'error';
 
@@ -120,8 +121,8 @@ export default function Home({ ctx }: { ctx: Ctx }) {
                                 <Icon name="addon" />
                             </span>
                             <span className="tile-label">Addon</span>
-                            <strong>{ctx.addon?.installed ?? 'Absent'}</strong>
-                            <small>{ctx.addon?.updateAvailable ? `${ctx.addon.latest} disponible` : ctx.addon?.installed ? 'À jour' : 'À installer'}</small>
+                            <strong>{versionLabel(ctx.addon?.installed) ?? 'Absent'}</strong>
+                            <small>{ctx.addon?.updateAvailable ? `${versionLabel(ctx.addon.latest)} disponible` : ctx.addon?.installed ? 'À jour' : 'À installer'}</small>
                         </button>
                     </section>
 
