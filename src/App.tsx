@@ -20,6 +20,7 @@ import Palette, { type Command } from './ui/Palette';
 import Rail from './ui/Rail';
 import SettingsPage from './ui/SettingsPage';
 import Toasts, { type Toast } from './ui/Toasts';
+import { versionLabel } from './version';
 
 /** Tout ce dont les écrans ont besoin : état et actions. */
 export interface Ctx {
@@ -197,7 +198,7 @@ export default function App() {
             setBusy('Mise à jour de l’addon…');
             try {
                 const installed = await invoke<string | null>('update_addon_now');
-                const message = installed ? `Addon mis à jour en ${installed} : fais /reload en jeu.` : 'L’addon est déjà à jour.';
+                const message = installed ? `Addon mis à jour en ${versionLabel(installed)} : fais /reload en jeu.` : 'L’addon est déjà à jour.';
                 notify(message);
                 if (installed) push({ id: `addon-${installed}`, at: Date.now() / 1000, kind: 'addon', ok: true, message });
                 refreshAddon();
