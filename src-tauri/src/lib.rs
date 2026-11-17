@@ -42,9 +42,9 @@ fn save_settings(token: String, saved_variables: String, site_url: Option<String
     if let Some(update) = update_addon { s.update_addon = update; }
     if let Some(beta) = beta_addon { s.beta_addon = beta; }
     if let Some(upload) = upload_combat_logs { s.upload_combat_logs = upload; }
-    if s.saved_variables != saved_variables { s.last_export_at = None; }
+    if s.saved_variables != savedvars::resolve(&saved_variables) { s.last_export_at = None; }
     s.token = token.trim().to_string();
-    s.saved_variables = saved_variables.trim().to_string();
+    s.saved_variables = savedvars::resolve(&saved_variables);
     if let Some(site) = site_url.filter(|u| !u.trim().is_empty()) { s.site_url = site.trim().trim_end_matches('/').to_string(); }
     s.save(&dir.0)?;
     Ok(s.clone())
