@@ -50,10 +50,13 @@ pub struct SyncReport {
 
 impl Settings {
     pub fn load(dir: &Path) -> Self {
-        fs::read_to_string(dir.join("settings.json"))
+        let mut settings: Self = fs::read_to_string(dir.join("settings.json"))
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Un dossier enregistré par une version précédente : le fichier qu'il contient.
+        settings.saved_variables = crate::savedvars::resolve(&settings.saved_variables);
+        settings
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
