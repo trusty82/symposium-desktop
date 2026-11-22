@@ -1282,3 +1282,38 @@ summary {
     font-weight: 700;
     font-size: 0.875rem;
 }
+
+/* « Se connecter avec le site » : le code à vérifier sur la page du site. */
+.pairing {
+    margin-top: 6px;
+}
+
+.pair-code {
+    margin: 14px 0 6px;
+    font: 800 clamp(30px, 6vw, 44px) / 1 var(--display);
+    letter-spacing: 0.12em;
+    color: var(--gold-bright);
+    font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    border: 2px solid var(--line-strong);
+    border-top-color: var(--gold-bright);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+
+.link-actions {
+    margin: 12px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner {
+        animation: none;
+    }
+}

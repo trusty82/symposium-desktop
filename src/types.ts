@@ -30,6 +30,8 @@ export interface Candidate {
     path: string;
     flavor: string;
     account: string;
+    /** Le fichier existe déjà ; sinon l'addon l'écrira à sa première déconnexion. */
+    ready: boolean;
 }
 
 export interface LogFile {

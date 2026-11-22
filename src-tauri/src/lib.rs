@@ -17,7 +17,7 @@ use sync::Shared;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State,
+    AppHandle, Emitter, Manager, State,
 };
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -59,6 +59,59 @@ fn detect_saved_variables() -> Vec<savedvars::Candidate> {
 async fn test_connection(token: String, site_url: Option<String>, state: State<'_, Shared>) -> Result<api::Me, String> {
     let site = site_url.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| state.lock().unwrap().site_url.clone());
     tauri::async_runtime::spawn_blocking(move || api::me(&site, &token)).await.map_err(|e| e.to_string())?
+}
+
+/// Nom de l'ordinateur, montré sur la page d'autorisation du site.
+fn device_name() -> String {
+    let host = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
+    let os = if cfg!(target_os = "windows") { "Windows" } else if cfg!(target_os = "macos") { "Mac" } else { "Linux" };
+    if host.trim().is_empty() { format!("Ordinateur {os}") } else { format!("{} ({os})", host.trim()) }
+}
+
+/// « Se connecter avec le site » : demande un code et ouvre la page d'autorisation dans le navigateur.
+#[tauri::command]
+async fn pair_start(app: AppHandle, state: State<'_, Shared>) -> Result<api::PairStart, String> {
+    let site = state.lock().unwrap().site_url.clone();
+    let start = tauri::async_runtime::spawn_blocking(move || api::pair_start(&site, &device_name())).await.map_err(|e| e.to_string())??;
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().open_url(&start.url, None::<&str>);
+    Ok(start)
+}
+
+#[derive(serde::Serialize)]
+struct PairOutcome {
+    status: &'static str,
+    name: Option<String>,
+    settings: Option<Settings>,
+}
+
+/// Où en est le code. Autorisé : le jeton est enregistré, le fichier de l'addon choisi s'il ne
+/// l'était pas, et l'addon installé ou mis à jour dans la foulée.
+#[tauri::command]
+async fn pair_poll(secret: String, app: AppHandle, state: State<'_, Shared>, dir: State<'_, ConfigDir>) -> Result<PairOutcome, String> {
+    let site = state.lock().unwrap().site_url.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || api::pair_poll(&site, &secret)).await.map_err(|e| e.to_string())??;
+    match result {
+        api::Pairing::Pending => Ok(PairOutcome { status: "pending", name: None, settings: None }),
+        api::Pairing::Expired => Ok(PairOutcome { status: "expired", name: None, settings: None }),
+        api::Pairing::Approved { token, name } => {
+            let settings = {
+                let mut s = state.lock().unwrap();
+                s.token = token;
+                if s.saved_variables.trim().is_empty() {
+                    if let Some(path) = savedvars::best() { s.saved_variables = path; }
+                }
+                s.save(&dir.0)?;
+                s.clone()
+            };
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = update::update_addon(&handle, false) { eprintln!("{e}"); }
+                let _ = handle.emit("settings", ());
+            });
+            Ok(PairOutcome { status: "approved", name: Some(name), settings: Some(settings) })
+        }
+    }
 }
 
 /// Les personnages du compte, le préféré en tête (page Personnages).
@@ -223,7 +276,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log, store_build, my_characters, set_main_character])
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, detect_saved_variables, test_connection, sync_now, check_update, addon_status, update_addon_now, refresh_standings, recent_logs, send_log, store_build, my_characters, set_main_character, pair_start, pair_poll])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de Symposium");
 }

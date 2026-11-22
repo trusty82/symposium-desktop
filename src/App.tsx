@@ -40,6 +40,8 @@ export interface Ctx {
     notify: (message: string, ok?: boolean) => void;
     save: (patch: Partial<Pick<Settings, 'token' | 'savedVariables' | 'updateAddon' | 'betaAddon' | 'uploadCombatLogs'>>) => Promise<boolean>;
     detect: () => Promise<void>;
+    /** Relit les réglages, l'addon et les dossiers du jeu (après une liaison faite en Rust). */
+    refresh: () => Promise<void>;
     syncNow: () => Promise<void>;
     updateAddon: () => Promise<void>;
     checkUpdate: () => Promise<void>;
@@ -181,6 +183,11 @@ export default function App() {
             }
         },
         detect: async () => setCandidates(await invoke<Candidate[]>('detect_saved_variables')),
+        refresh: async () => {
+            setSettings(await invoke<Settings>('get_settings'));
+            setCandidates(await invoke<Candidate[]>('detect_saved_variables'));
+            refreshAddon();
+        },
         syncNow: async () => {
             setBusy('Envoi de ta fiche…');
             try {
@@ -245,7 +252,7 @@ export default function App() {
         { id: 'epgp', label: 'Récupérer le classement EPGP maintenant', icon: 'refresh', run: ctx.refreshStandings, disabled: !ready },
         ...(store ? [] : [{ id: 'update', label: 'Rechercher une mise à jour de Symposium', icon: 'refresh', run: ctx.checkUpdate } as Command]),
         { id: 'site', label: 'Ouvrir le site de la guilde', icon: 'external', run: () => ctx.open(site) },
-        { id: 'profil', label: 'Ouvrir mon profil (jeton)', icon: 'external', run: () => ctx.open(`${site}/profil#application`) },
+        { id: 'profil', label: 'Ouvrir mon profil sur le site', icon: 'external', run: () => ctx.open(`${site}/profil`) },
         { id: 'calendar', label: 'Ouvrir le calendrier des sorties', icon: 'external', run: () => ctx.open(`${site}/calendrier`) },
         { id: 'go-home', label: 'Aller à l’accueil', icon: 'home', run: () => setPage('home') },
         { id: 'go-characters', label: 'Mes personnages (choisir mon préféré)', icon: 'people', run: () => setPage('characters') },

@@ -2,6 +2,7 @@ import type { Ctx } from '../App';
 import logo from '../assets/logo.png';
 import { type Activity, ago } from '../types';
 import Icon, { type IconName } from './Icon';
+import Pairing from './Pairing';
 import { versionLabel } from '../version';
 
 type State = 'setup' | 'ok' | 'busy' | 'error';
@@ -35,9 +36,9 @@ function Orb({ state }: { state: State }) {
 
 function Setup({ ctx }: { ctx: Ctx }) {
     const steps = [
-        { done: Boolean(ctx.settings?.token), label: 'Ton jeton personnel', hint: 'Créé sur ton profil du site, en un clic.' },
-        { done: Boolean(ctx.settings?.savedVariables), label: 'Le fichier de l’addon', hint: 'Je le trouve tout seul dans ton dossier du jeu.' },
-        { done: Boolean(ctx.addon?.installed), label: 'L’addon Symposium', hint: 'Installé dans le jeu (CurseForge ou ici même).' },
+        { done: Boolean(ctx.settings?.token), label: 'Ton compte du site', hint: '« Se connecter avec le site » : tu autorises cet ordinateur, c’est tout.' },
+        { done: Boolean(ctx.settings?.savedVariables), label: 'Ton jeu', hint: 'Je le trouve tout seul.' },
+        { done: Boolean(ctx.addon?.installed), label: 'L’addon Symposium', hint: 'Je l’installe et le garde à jour.' },
     ];
     const done = steps.filter((s) => s.done).length;
     return (
@@ -60,9 +61,13 @@ function Setup({ ctx }: { ctx: Ctx }) {
                     </li>
                 ))}
             </ol>
-            <button type="button" className="btn primary" onClick={() => ctx.go(ctx.settings?.token && ctx.settings?.savedVariables ? 'addon' : 'link')}>
-                Continuer <Icon name="arrow" size={18} />
-            </button>
+            {ctx.settings?.token ? (
+                <button type="button" className="btn primary" onClick={() => ctx.go(ctx.settings?.savedVariables ? 'addon' : 'link')}>
+                    Continuer <Icon name="arrow" size={18} />
+                </button>
+            ) : (
+                <Pairing ctx={ctx} />
+            )}
         </section>
     );
 }

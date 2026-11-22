@@ -13,8 +13,13 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
 - Surveille `WTF\Account\<compte>\SavedVariables\Symposium.lua` (écrit par l'addon à la
   déconnexion ou au `/reload`) et envoie le dernier export du personnage (`/symposium`) au site :
   la fiche se met à jour toute seule.
-- Se connecte au site avec un **jeton personnel**, créé dans le profil (section
-  « Application Symposium ») ; API `/api/desktop/…` du site.
+- Se connecte au site par **« Se connecter avec le site »** (1.1.0) : l'application demande un code
+  court (`POST /api/desktop/pair`), ouvre la page `/application/lier?code=…` du site où le membre
+  autorise l'ordinateur, puis récupère son jeton (`POST /api/desktop/pair/poll`, remis une seule fois).
+  Le **jeton personnel** créé dans le profil reste possible en secours ; API `/api/desktop/…` du site.
+- Trouve le jeu tout seul (1.1.0) : les fichiers `Symposium.lua` existants d'abord, sinon le compte
+  du jeu joué en dernier, même si l'addon n'y a encore rien écrit ; l'addon y est alors installé
+  (dossier `Interface\AddOns` créé au besoin) dès la liaison.
 - Met à jour l'addon Symposium dans le dossier du jeu (version stable du site, désactivable) :
   l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`). Vérifiée toutes les 10 minutes
   (0.11.1), et à chaque retour sur la fenêtre pour l'affichage. Case « Addon bêta » (0.10.0) :

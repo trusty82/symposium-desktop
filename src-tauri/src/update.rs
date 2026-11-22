@@ -40,7 +40,9 @@ pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, Stri
     let settings = app.state::<Shared>().lock().unwrap().clone();
     if !settings.ready() || (!force && !settings.update_addon) { return Ok(None); }
     let latest = addon::latest(&settings, &api::me(&settings.site_url, &settings.token)?);
-    if !addon::status(&settings, latest).update_available { return Ok(None); }
+    let status = addon::status(&settings, latest);
+    if !status.update_available { return Ok(None); }
+    let first = status.installed.is_none();
     let version = addon::install(&settings)?;
     // La fenêtre se met à jour (version installée, fil d'activité).
     let _ = app.emit("addon", &version);
@@ -48,7 +50,11 @@ pub fn update_addon(app: &AppHandle, force: bool) -> Result<Option<String>, Stri
         .notification()
         .builder()
         .title("Symposium")
-        .body(format!("Addon Symposium mis à jour en {version} : fais /reload en jeu (ou reconnecte-toi)."))
+        .body(if first {
+            format!("Addon Symposium {version} installé : il sera là à ton prochain lancement du jeu (ou après /reload).")
+        } else {
+            format!("Addon Symposium mis à jour en {version} : fais /reload en jeu (ou reconnecte-toi).")
+        })
         .show();
     Ok(Some(version))
 }

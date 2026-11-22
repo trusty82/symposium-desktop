@@ -16,6 +16,8 @@ pub struct LastExport {
 pub fn read_last_export(path: &Path) -> Result<Option<LastExport>, String> {
     // Le jeu n'écrit pas toujours de l'UTF-8 valide (noms lus en jeu…) : lecture tolérante,
     // le code de l'export n'utilise que des caractères ASCII.
+    // Pas encore écrit : l'addon n'a jamais tourné sur ce compte (installé à l'instant par l'application).
+    if !path.exists() { return Ok(None); }
     if path.is_dir() {
         return Err(format!("{} est un dossier, pas le fichier de l’addon : indique son fichier Symposium.lua (page Liaison).", path.display()));
     }
@@ -39,6 +41,8 @@ pub struct Candidate {
     /// Version du jeu (dossier _classic_beta_, _classic_…).
     pub flavor: String,
     pub account: String,
+    /// Le fichier existe déjà (l'addon a tourné sur ce compte) ; sinon, c'est là qu'il l'écrira.
+    pub ready: bool,
 }
 
 /// Fichiers Symposium.lua sous un dossier : celui du fichier, d'un compte, d'une version
@@ -115,23 +119,82 @@ fn wow_roots() -> Vec<PathBuf> {
     roots.into_iter().filter(|r| r.is_dir()).collect()
 }
 
-/// Fichiers Symposium.lua trouvés dans les dossiers de World of Warcraft.
-pub fn detect() -> Vec<Candidate> {
-    let mut found = Vec::new();
-    for root in wow_roots() {
-        for file in files_under(&root) {
-            // …\<version>\WTF\Account\<compte>\SavedVariables\Symposium.lua
-            let account = file.ancestors().nth(2).and_then(|a| a.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let flavor = file.ancestors().nth(5).and_then(|a| a.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            found.push(Candidate { path: file.to_string_lossy().to_string(), flavor, account });
+/// Dossiers SavedVariables des comptes du jeu (…\<version>\WTF\Account\<compte>\SavedVariables),
+/// avec ou sans fichier de l'addon : ils existent dès la première connexion en jeu.
+fn account_dirs_under(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(flavors) = fs::read_dir(root) else { return out };
+    for flavor in flavors.flatten() {
+        if !flavor.file_name().to_string_lossy().starts_with('_') { continue; }
+        let Ok(accounts) = fs::read_dir(flavor.path().join("WTF").join("Account")) else { continue };
+        for account in accounts.flatten() {
+            // WTF\Account\SavedVariables : réglages communs aux comptes, pas un compte.
+            if account.file_name().to_string_lossy().eq_ignore_ascii_case("SavedVariables") { continue; }
+            let dir = account.path().join("SavedVariables");
+            if dir.is_dir() { out.push(dir); }
         }
     }
-    found
+    out
+}
+
+fn candidate(file: &Path, ready: bool) -> Candidate {
+    // …\<version>\WTF\Account\<compte>\SavedVariables\Symposium.lua
+    let name = |n: usize| file.ancestors().nth(n).and_then(|a| a.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    Candidate { path: file.to_string_lossy().to_string(), flavor: name(5), account: name(2), ready }
+}
+
+/// Fichiers Symposium.lua trouvés dans les dossiers de World of Warcraft, puis les comptes du jeu
+/// où l'addon n'a pas encore écrit (il vient d'être installé) : le meilleur choix en premier.
+pub fn detect() -> Vec<Candidate> {
+    detect_in(&wow_roots())
+}
+
+fn detect_in(roots: &[PathBuf]) -> Vec<Candidate> {
+    let mut files: Vec<PathBuf> = roots.iter().flat_map(|r| files_under(r)).collect();
+    files.sort_by_key(|f| std::cmp::Reverse(modified(f)));
+    files.dedup();
+    let mut empty: Vec<PathBuf> = roots.iter().flat_map(|r| account_dirs_under(r))
+        .filter(|d| !d.join("Symposium.lua").is_file())
+        .collect();
+    // Le compte joué en dernier : son dossier SavedVariables change à chaque déconnexion.
+    empty.sort_by_key(|d| std::cmp::Reverse(modified(d)));
+    files.iter().map(|f| candidate(f, true))
+        .chain(empty.iter().map(|d| candidate(&d.join("Symposium.lua"), false)))
+        .collect()
+}
+
+/// Le fichier à surveiller sans rien demander : le plus récent, sinon le compte joué en dernier.
+pub fn best() -> Option<String> {
+    detect().into_iter().next().map(|c| c.path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn propose_un_compte_sans_fichier_apres_ceux_qui_en_ont_un() {
+        let root = std::env::temp_dir().join(format!("symp-detect-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let with = root.join("_classic_era_").join("WTF").join("Account").join("ANCIEN").join("SavedVariables");
+        let without = root.join("_forever_").join("WTF").join("Account").join("12345#1").join("SavedVariables");
+        fs::create_dir_all(&with).unwrap();
+        fs::create_dir_all(&without).unwrap();
+        fs::create_dir_all(root.join("_forever_").join("WTF").join("Account").join("SavedVariables")).unwrap();
+        fs::write(with.join("Symposium.lua"), "SymposiumDB = {}").unwrap();
+
+        let found = detect_in(&[root.clone()]);
+        assert_eq!(found.len(), 2);
+        assert!(found[0].ready);
+        assert_eq!(found[0].account, "ANCIEN");
+        assert!(!found[1].ready);
+        assert_eq!(found[1].flavor, "_forever_");
+        assert_eq!(found[1].account, "12345#1");
+        assert!(found[1].path.ends_with("Symposium.lua"));
+        // Pas encore écrit : rien à envoyer, sans erreur.
+        assert!(read_last_export(Path::new(&found[1].path)).unwrap().is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn lit_le_dernier_export() {

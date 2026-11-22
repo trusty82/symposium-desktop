@@ -157,3 +157,51 @@ pub fn standings(site: &str, token: &str) -> Result<Standings, String> {
     if !response.status().is_success() { return Err(error(response)); }
     response.json::<Standings>().map_err(|e| format!("Réponse du site illisible : {e}"))
 }
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PairStart {
+    pub code: String,
+    pub secret: String,
+    pub url: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// « Se connecter avec le site » : un code court, à autoriser sur la page du site ouverte dans le navigateur.
+pub fn pair_start(site: &str, device: &str) -> Result<PairStart, String> {
+    let response = client()
+        .post(url(site, "/pair"))
+        .header("Accept", "application/json")
+        .json(&serde_json::json!({ "device": device }))
+        .send()
+        .map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.json().map_err(|e| format!("Réponse du site illisible : {e}"))
+}
+
+pub enum Pairing {
+    Pending,
+    Approved { token: String, name: String },
+    Expired,
+}
+
+/// Où en est le code : en attente, autorisé (le jeton, remis une seule fois) ou expiré.
+pub fn pair_poll(site: &str, secret: &str) -> Result<Pairing, String> {
+    let response = client()
+        .post(url(site, "/pair/poll"))
+        .header("Accept", "application/json")
+        .json(&serde_json::json!({ "secret": secret }))
+        .send()
+        .map_err(|e| format!("Site injoignable : {e}"))?;
+    match response.status().as_u16() {
+        202 => Ok(Pairing::Pending),
+        410 => Ok(Pairing::Expired),
+        200 => {
+            let body: serde_json::Value = response.json().map_err(|e| format!("Réponse du site illisible : {e}"))?;
+            let token = body["token"].as_str().ok_or("Réponse du site sans jeton.")?.to_string();
+            Ok(Pairing::Approved { token, name: body["name"].as_str().unwrap_or("").to_string() })
+        }
+        _ => Err(error(response)),
+    }
+}

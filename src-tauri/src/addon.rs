@@ -65,7 +65,8 @@ pub fn status(settings: &Settings, latest: Option<String>) -> AddonStatus {
         // Bêta décochée : retour à la stable, même plus ancienne que la bêta installée.
         (Some(i), Some(l)) if !settings.beta_addon && i.contains('-') && !l.contains('-') => l != i,
         (Some(i), Some(l)) => compare(l, i) == Ordering::Greater,
-        (None, Some(_)) => dir.as_ref().is_some_and(|d| d.parent().is_some_and(Path::is_dir)),
+        // Pas encore installé : dès que le dossier de la version du jeu existe (AddOns est créé au besoin).
+        (None, Some(_)) => dir.as_ref().is_some_and(|d| d.ancestors().nth(3).is_some_and(Path::is_dir)),
         _ => false,
     };
     AddonStatus { dir: dir.map(|d| d.to_string_lossy().to_string()), installed, latest, update_available }
