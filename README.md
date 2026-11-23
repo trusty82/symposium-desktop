@@ -18,7 +18,7 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   autorise l'ordinateur, puis récupère son jeton (`POST /api/desktop/pair/poll`, remis une seule fois).
   Le **jeton personnel** créé dans le profil reste possible en secours ; API `/api/desktop/…` du site.
 - Trouve le jeu tout seul (1.1.0) : les fichiers `Symposium.lua` existants d'abord, sinon le compte
-  du jeu joué en dernier, même si l'addon n'y a encore rien écrit ; l'addon y est alors installé
+  du jeu joué en dernier (WoW: Forever d'abord, jamais Retail, 1.1.1), même si l'addon n'y a encore rien écrit ; l'addon y est alors installé
   (dossier `Interface\AddOns` créé au besoin) dès la liaison.
 - Met à jour l'addon Symposium dans le dossier du jeu (version stable du site, désactivable) :
   l'ancien dossier est gardé à côté (`AddOns\.Symposium-ancien`). Vérifiée toutes les 10 minutes

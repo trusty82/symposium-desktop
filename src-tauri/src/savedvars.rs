@@ -45,6 +45,9 @@ pub struct Candidate {
     pub ready: bool,
 }
 
+/// Dossier de la version du jeu de WoW: Forever.
+const FOREVER: &str = "_classic_beta_";
+
 /// Fichiers Symposium.lua sous un dossier : celui du fichier, d'un compte, d'une version
 /// du jeu (_forever_…), de WTF ou de World of Warcraft.
 fn files_under(dir: &Path) -> Vec<PathBuf> {
@@ -153,11 +156,13 @@ fn detect_in(roots: &[PathBuf]) -> Vec<Candidate> {
     let mut files: Vec<PathBuf> = roots.iter().flat_map(|r| files_under(r)).collect();
     files.sort_by_key(|f| std::cmp::Reverse(modified(f)));
     files.dedup();
+    // Sans fichier de l'addon : jamais Retail (l'addon n'y tourne pas), WoW: Forever d'abord,
+    // puis le compte joué en dernier (son dossier SavedVariables change à chaque déconnexion).
+    let flavor_of = |d: &PathBuf| d.ancestors().nth(4).and_then(|a| a.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let mut empty: Vec<PathBuf> = roots.iter().flat_map(|r| account_dirs_under(r))
-        .filter(|d| !d.join("Symposium.lua").is_file())
+        .filter(|d| !d.join("Symposium.lua").is_file() && flavor_of(d) != "_retail_")
         .collect();
-    // Le compte joué en dernier : son dossier SavedVariables change à chaque déconnexion.
-    empty.sort_by_key(|d| std::cmp::Reverse(modified(d)));
+    empty.sort_by_key(|d| (flavor_of(d) != FOREVER, std::cmp::Reverse(modified(d))));
     files.iter().map(|f| candidate(f, true))
         .chain(empty.iter().map(|d| candidate(&d.join("Symposium.lua"), false)))
         .collect()
@@ -182,14 +187,20 @@ mod tests {
         fs::create_dir_all(&without).unwrap();
         fs::create_dir_all(root.join("_forever_").join("WTF").join("Account").join("SavedVariables")).unwrap();
         fs::write(with.join("Symposium.lua"), "SymposiumDB = {}").unwrap();
+        fs::create_dir_all(root.join("_retail_").join("WTF").join("Account").join("RETAIL").join("SavedVariables")).unwrap();
+        let forever = root.join("_classic_beta_").join("WTF").join("Account").join("FOREVER").join("SavedVariables");
+        fs::create_dir_all(&forever).unwrap();
+        // Joué plus récemment que Forever : passe quand même après.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::create_dir_all(&without).unwrap();
+        fs::write(without.join("touch"), "").unwrap();
 
         let found = detect_in(&[root.clone()]);
-        assert_eq!(found.len(), 2);
+        let names: Vec<&str> = found.iter().map(|c| c.account.as_str()).collect();
+        assert_eq!(names, ["ANCIEN", "FOREVER", "12345#1"], "fichier existant, puis Forever, jamais Retail");
         assert!(found[0].ready);
-        assert_eq!(found[0].account, "ANCIEN");
         assert!(!found[1].ready);
-        assert_eq!(found[1].flavor, "_forever_");
-        assert_eq!(found[1].account, "12345#1");
+        assert_eq!(found[1].flavor, "_classic_beta_");
         assert!(found[1].path.ends_with("Symposium.lua"));
         // Pas encore écrit : rien à envoyer, sans erreur.
         assert!(read_last_export(Path::new(&found[1].path)).unwrap().is_none());
