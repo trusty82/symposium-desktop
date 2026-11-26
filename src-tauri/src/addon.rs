@@ -216,13 +216,13 @@ pub fn sync_marker(saved_variables: &Path, installed: bool, combat: bool) -> Res
         .and_then(|toc| toc.lines().find_map(|l| l.trim().strip_prefix("## Interface:").map(|v| v.trim().to_string())))
         .unwrap_or_else(|| "16001".into());
     let toc = format!(
-        "## Interface: {interface}\n## Title: Symposium (application)\n## Notes: Installé par l'application Symposium : classement EPGP et journal de combat automatique.\n## Version: 2\n\nSymposiumDesktop.lua\nStandings.lua\n"
+        "## Interface: {interface}\n## Title: Symposium (application)\n## Notes: Installé par l'application Symposium : classement EPGP, évènements à inviter et journal de combat automatique.\n## Version: 3\n\nSymposiumDesktop.lua\nStandings.lua\nEvents.lua\n"
     );
     let lua = format!(
         "-- Installé par l'application Symposium.\nSYMPOSIUM_DESKTOP = true\nSYMPOSIUM_DESKTOP_COMBATLOG = {combat}\n"
     );
     let same = |file: &str, content: &str| fs::read_to_string(marker.join(file)).ok().as_deref() == Some(content);
-    if same("SymposiumDesktop.toc", &toc) && same("SymposiumDesktop.lua", &lua) && marker.join("Standings.lua").exists() {
+    if same("SymposiumDesktop.toc", &toc) && same("SymposiumDesktop.lua", &lua) && marker.join("Standings.lua").exists() && marker.join("Events.lua").exists() {
         return Ok(false);
     }
     fs::create_dir_all(&marker).map_err(|e| e.to_string())?;
@@ -231,21 +231,35 @@ pub fn sync_marker(saved_variables: &Path, installed: bool, combat: bool) -> Res
     if !marker.join("Standings.lua").exists() {
         fs::write(marker.join("Standings.lua"), "-- Classement EPGP : déposé par l'application Symposium.\n").map_err(|e| e.to_string())?;
     }
+    if !marker.join("Events.lua").exists() {
+        fs::write(marker.join("Events.lua"), "-- Évènements à inviter : déposés par l'application Symposium.\n").map_err(|e| e.to_string())?;
+    }
     Ok(true)
 }
 
 /// Classement EPGP du site (code SYMPE1), lu par l'addon Symposium au /reload.
 pub fn write_standings(saved_variables: &Path, code: &str) -> Result<bool, String> {
+    write_code(saved_variables, code, "SYMPE1:", "Standings.lua", "SYMPOSIUM_DESKTOP_STANDINGS", "Classement EPGP")
+}
+
+/// Évènements Discord à venir et leurs inscrits (code SYMPV1), pour la fenêtre d'invitations.
+pub fn write_events(saved_variables: &Path, code: &str) -> Result<bool, String> {
+    write_code(saved_variables, code, "SYMPV1:", "Events.lua", "SYMPOSIUM_DESKTOP_EVENTS", "Évènements à inviter")
+}
+
+/// Un code du site (préfixe puis base64 seulement : rien d'autre n'entre dans le Lua) dans un
+/// fichier de l'addon témoin ; vrai s'il a changé.
+fn write_code(saved_variables: &Path, code: &str, prefix: &str, file: &str, var: &str, what: &str) -> Result<bool, String> {
     let Some(main) = addon_dir(saved_variables) else { return Ok(false) };
     let marker = main.with_file_name("SymposiumDesktop");
-    if !marker.exists() || !code.starts_with("SYMPE1:") || !code[7..].chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)) {
+    if !marker.exists() || !code.starts_with(prefix) || !code[prefix.len()..].chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)) {
         return Ok(false);
     }
-    let lua = format!("-- Classement EPGP : déposé par l'application Symposium.\nSYMPOSIUM_DESKTOP_STANDINGS = \"{code}\"\n");
-    if fs::read_to_string(marker.join("Standings.lua")).ok().as_deref() == Some(lua.as_str()) {
+    let lua = format!("-- {what} : déposé par l'application Symposium.\n{var} = \"{code}\"\n");
+    if fs::read_to_string(marker.join(file)).ok().as_deref() == Some(lua.as_str()) {
         return Ok(false);
     }
-    fs::write(marker.join("Standings.lua"), lua).map_err(|e| e.to_string())?;
+    fs::write(marker.join(file), lua).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -277,6 +291,11 @@ mod marker_tests {
         assert!(fs::read_to_string(marker.join("Standings.lua")).unwrap().contains("SYMPOSIUM_DESKTOP_STANDINGS = \"SYMPE1:abc+/=\""));
         assert_eq!(write_standings(&sv, "SYMPE1:abc+/="), Ok(false));
         assert_eq!(write_standings(&sv, "SYMPE1:\"); os.exit()--"), Ok(false));
+        // Évènements à inviter : même garde, leur propre fichier, listé dans le TOC.
+        assert!(toc.contains("Events.lua"));
+        assert_eq!(write_events(&sv, "SYMPV1:xyz="), Ok(true));
+        assert!(fs::read_to_string(marker.join("Events.lua")).unwrap().contains("SYMPOSIUM_DESKTOP_EVENTS = \"SYMPV1:xyz=\""));
+        assert_eq!(write_events(&sv, "SYMPE1:xyz="), Ok(false));
 
         assert_eq!(sync_marker(&sv, false, false), Ok(true));
         assert!(!marker.exists());

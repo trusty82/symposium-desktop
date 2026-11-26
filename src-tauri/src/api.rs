@@ -158,6 +158,18 @@ pub fn standings(site: &str, token: &str) -> Result<Standings, String> {
     response.json::<Standings>().map_err(|e| format!("Réponse du site illisible : {e}"))
 }
 
+#[derive(Deserialize)]
+pub struct Events {
+    pub code: String,
+}
+
+/// Évènements Discord à venir (les siens, tous pour le Conseil), en code SYMPV1 pour l'addon.
+pub fn events(site: &str, token: &str) -> Result<Events, String> {
+    let response = client().get(url(site, "/evenements")).bearer_auth(token.trim()).header("Accept", "application/json").send().map_err(|e| format!("Site injoignable : {e}"))?;
+    if !response.status().is_success() { return Err(error(response)); }
+    response.json::<Events>().map_err(|e| format!("Réponse du site illisible : {e}"))
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PairStart {

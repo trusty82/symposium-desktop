@@ -35,6 +35,12 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   sort et courbe des dégâts subis (0.12.1). École de magie de chaque sort lancé (0.12.2), pour la frise.
 - Page Personnages (0.13.0) : les personnages du compte sur le site, et le choix du préféré
   (`/api/desktop/me`, `PUT /api/desktop/characters/{id}/main`).
+- Évènements à inviter (1.2.0) : au démarrage puis toutes les 5 minutes, les évènements Discord à
+  venir de `/symposium create` (ceux qu'on organise, tous pour le Conseil), avec le personnage de
+  chaque inscrit (`GET /api/desktop/evenements`, code `SYMPV1`), déposés dans l'addon témoin
+  (`SymposiumDesktop/Events.lua`) : l'addon Symposium ouvre une fenêtre d'invitations 15 minutes
+  avant le début. Lu par le jeu à la connexion ou au `/reload` ; le nouveau fichier demande de
+  relancer le jeu une fois.
 - Explique quand l'export envoyé est le même que la dernière fois (`/symposium` puis `/reload`).
 - Se met à jour toute seule (au démarrage puis toutes les 6 heures) depuis les Releases GitHub
   (`latest.json`, mises à jour signées).

@@ -608,6 +608,13 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
                     let _ = crate::addon::write_standings(Path::new(&settings.saved_variables), &standings.code);
                 }
             }
+            // Évènements à inviter (organisateur, Conseil) : au démarrage puis toutes les 5 minutes ;
+            // le jeu les lit à la connexion ou au /reload.
+            if settings.ready() && tick % 60 == 1 {
+                if let Ok(events) = api::events(&settings.site_url, &settings.token) {
+                    let _ = crate::addon::write_events(Path::new(&settings.saved_variables), &events.code);
+                }
+            }
             // Toutes les minutes : a-t-on joué dans une autre version du jeu (Bêta, Stress Test…) ?
             if settings.ready() && tick % 12 == 0 {
                 follow(&app, &state, &config_dir, &mut warned);
