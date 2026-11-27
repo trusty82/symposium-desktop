@@ -851,12 +851,12 @@ pub fn send_file(site: &str, token: &str, path: &Path) -> Result<String, String>
     if encounters.is_empty() {
         return Ok("Aucun combat dans ce journal.".into());
     }
+    // Par envois groupés (40 combats au plus), pour ne pas dépasser la limite du site.
     let (mut created, mut known) = (0, 0);
-    for encounter in &encounters {
-        match api::upload_encounter(site, token, encounter)? {
-            done if done.created => created += 1,
-            _ => known += 1,
-        }
+    for range in api::batches(&encounters) {
+        let done = api::upload_encounters(site, token, &encounters[range])?;
+        created += done.created;
+        known += done.known;
     }
     let trash = encounters.iter().filter(|e| e.trash).count();
     Ok(format!(
@@ -921,6 +921,10 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
     thread::spawn(move || {
         let mut reader: Option<Reader> = None;
         let mut pending: Vec<Encounter> = Vec::new();
+        // Premier pack de trash en attente : il part avec le boss suivant, ou au bout de 3 minutes.
+        let mut waiting: Option<std::time::Instant> = None;
+        // Trop de demandes : on attend avant de réessayer.
+        let mut pause_until: Option<std::time::Instant> = None;
         let mut marker: Option<(String, bool, bool)> = None;
         let mut tick: u32 = 0;
         let mut warned: Option<String> = None;
@@ -963,38 +967,60 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
             }
             pending.extend(reader.as_mut().unwrap().read());
 
-            // Envoi dans l'ordre ; ce qui échoue (site injoignable) est retenté au tour suivant.
-            while let Some(encounter) = pending.first().cloned() {
-                let report = match api::upload_encounter(&settings.site_url, &settings.token, &encounter) {
+            if !pending.is_empty() && waiting.is_none() {
+                waiting = Some(std::time::Instant::now());
+            }
+            // Le trash d'une instance part avec le boss qui suit, en un seul envoi : on attend un boss,
+            // 3 minutes, ou assez de combats pour un envoi plein.
+            let due = pending.iter().any(|e| !e.trash)
+                || waiting.is_some_and(|t| t.elapsed() >= Duration::from_secs(180))
+                || pending.len() >= 40;
+            let paused = pause_until.is_some_and(|t| std::time::Instant::now() < t);
+            while due && !paused && !pending.is_empty() {
+                let range = api::batches(&pending).into_iter().next().unwrap_or(0..pending.len());
+                let batch: Vec<Encounter> = pending[range.clone()].to_vec();
+                let (bosses, trash) = (batch.iter().filter(|e| !e.trash).count(), batch.iter().filter(|e| e.trash).count());
+                let last = batch.iter().rev().find(|e| !e.trash).or(batch.last()).cloned();
+                let report = match api::upload_encounters(&settings.site_url, &settings.token, &batch) {
                     Ok(done) => SyncReport {
                         at: chrono::Utc::now().timestamp(),
-                        ok: true,
+                        ok: done.failed == 0,
                         message: format!(
-                            "{} envoyé : {} ({}, {} s){}.",
-                            if encounter.trash { "Trash" } else { "Combat" },
-                            encounter.name,
-                            if encounter.success { "tué" } else { "essai" },
-                            encounter.duration.round(),
-                            if done.created { "" } else { ", déjà reçu d’un autre joueur" }
+                            "Envoyé : {}{}{}{}.",
+                            match (bosses, trash) {
+                                (0, t) => format!("{t} pack{} de trash", if t > 1 { "s" } else { "" }),
+                                (b, 0) => format!("{b} combat{} de boss", if b > 1 { "s" } else { "" }),
+                                (b, t) => format!("{b} combat{} de boss et {t} pack{} de trash", if b > 1 { "s" } else { "" }, if t > 1 { "s" } else { "" }),
+                            },
+                            last.as_ref().filter(|e| !e.trash).map(|e| format!(" ({}, {})", e.name, if e.success { "tué" } else { "essai" })).unwrap_or_default(),
+                            if done.known > 0 { format!(", {} déjà reçu{} d’un autre joueur", done.known, if done.known > 1 { "s" } else { "" }) } else { String::new() },
+                            if done.failed > 0 { format!(", {} refusé{}", done.failed, if done.failed > 1 { "s" } else { "" }) } else { String::new() },
                         ),
                         character: None,
-                        url: Some(done.url),
-                        export_at: Some(encounter.started_at),
+                        url: done.results.iter().rev().find_map(|r| r.url.clone()),
+                        export_at: last.as_ref().map(|e| e.started_at),
                     },
                     Err(message) => {
-                        let retry = message.starts_with("Site injoignable");
-                        let report = SyncReport { at: chrono::Utc::now().timestamp(), ok: false, message, character: None, url: None, export_at: Some(encounter.started_at) };
-                        if retry {
+                        let report = SyncReport { at: chrono::Utc::now().timestamp(), ok: false, message: message.clone(), character: None, url: None, export_at: last.as_ref().map(|e| e.started_at) };
+                        if api::retryable(&message) {
+                            // Rien n'est perdu : retenté plus tard (une minute après « trop de demandes »).
+                            if message.starts_with("Trop de demandes") {
+                                pause_until = Some(std::time::Instant::now() + Duration::from_secs(60));
+                            }
                             save(&app, &state, &config_dir, report);
                             break;
                         }
                         report
                     }
                 };
-                pending.remove(0);
+                pending.drain(range);
                 save(&app, &state, &config_dir, report);
+                if pending.is_empty() {
+                    waiting = None;
+                }
             }
-            pending.truncate(50);
+            // Site injoignable longtemps : on garde au plus les 500 combats les plus anciens.
+            pending.truncate(500);
         }
     });
 }

@@ -80,6 +80,7 @@ fn error(response: Response) -> String {
         403 => "Accès réservé aux membres de Symposium.".into(),
         422 => format!("Export refusé par le site : {detail}"),
         429 => "Trop de demandes : réessaie dans une minute.".into(),
+        413 => "Envoi trop gros pour le site.".into(),
         _ => format!("Erreur du site ({status}) {detail}"),
     }
 }
@@ -125,19 +126,64 @@ pub fn download_addon(site: &str, token: &str, beta: bool) -> Result<Vec<u8>, St
     response.bytes().map(|b| b.to_vec()).map_err(|e| format!("Téléchargement de l’addon interrompu : {e}"))
 }
 
+/// Combat d'un envoi groupé : reçu (nouveau ou déjà là), ou refusé.
 #[derive(Deserialize)]
-pub struct EncounterUploaded {
+pub struct BatchResult {
+    #[serde(default)]
     pub created: bool,
-    pub url: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
-/// Résumé d'un combat de boss (le journal lui-même reste sur l'ordinateur).
-pub fn upload_encounter(site: &str, token: &str, encounter: &crate::combatlog::Encounter) -> Result<EncounterUploaded, String> {
-    let response = client()
-        .post(url(site, "/encounters"))
+#[derive(Deserialize)]
+pub struct BatchUploaded {
+    pub results: Vec<BatchResult>,
+    pub created: u32,
+    pub known: u32,
+    pub failed: u32,
+}
+
+/// Erreur passagère (site injoignable, trop de demandes) : l'envoi est retenté plus tard.
+pub fn retryable(message: &str) -> bool {
+    message.starts_with("Site injoignable") || message.starts_with("Trop de demandes")
+}
+
+/// Combats au plus par envoi, et taille au plus d'un envoi (un raid de 40 détaillé pèse lourd).
+const BATCH: usize = 40;
+const BATCH_BYTES: usize = 3 * 1024 * 1024;
+
+/// Découpe des combats en envois : jusqu'à 40 combats et 3 Mo chacun (un seul combat plus gros part seul).
+pub fn batches(encounters: &[crate::combatlog::Encounter]) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let (mut start, mut bytes) = (0, 0);
+    for (i, e) in encounters.iter().enumerate() {
+        let size = serde_json::to_vec(e).map(|v| v.len()).unwrap_or(0);
+        if i > start && (i - start >= BATCH || bytes + size > BATCH_BYTES) {
+            out.push(start..i);
+            start = i;
+            bytes = 0;
+        }
+        bytes += size;
+    }
+    if start < encounters.len() {
+        out.push(start..encounters.len());
+    }
+    out
+}
+
+/// Plusieurs combats en un seul envoi : le trash d'une instance et le boss qui suit (1.5.0).
+pub fn upload_encounters(site: &str, token: &str, encounters: &[crate::combatlog::Encounter]) -> Result<BatchUploaded, String> {
+    let response = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .user_agent(concat!("SymposiumDesktop/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .expect("client HTTP")
+        .post(url(site, "/encounters/batch"))
         .bearer_auth(token.trim())
         .header("Accept", "application/json")
-        .json(encounter)
+        .json(&serde_json::json!({ "encounters": encounters }))
         .send()
         .map_err(|e| format!("Site injoignable : {e}"))?;
     if !response.status().is_success() { return Err(error(response)); }

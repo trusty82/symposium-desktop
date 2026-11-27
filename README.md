@@ -40,6 +40,9 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   Trash (1.4.1) : dans une instance, chaque pack de monstres hors combat de boss (du premier coup
   échangé à 8 s sans combat) est résumé et envoyé comme un combat ; chaque combat, boss ou trash,
   liste aussi ses monstres, hostiles ou neutres (combien, tués, dégâts reçus et infligés au groupe).
+  Envois groupés (1.5.0) : les packs de trash attendent le boss suivant (3 minutes au plus) et partent
+  avec lui en un seul envoi (`POST /api/desktop/encounters/batch`, 40 combats et 3 Mo au plus) ;
+  « trop de demandes » ou site injoignable : rien n'est perdu, l'envoi est retenté.
 - Page Personnages (0.13.0) : les personnages du compte sur le site, et le choix du préféré
   (`/api/desktop/me`, `PUT /api/desktop/characters/{id}/main`).
 - Évènements à inviter (1.2.0) : au démarrage puis toutes les 5 minutes, les évènements Discord à
