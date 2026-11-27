@@ -27,6 +27,8 @@ const RECAP_MAX: usize = 60;
 const HEALTH_FRESH: f64 = 3.0;
 /// Fenêtre pour compter les joueurs touchés par le même sort (capacité de zone).
 const SPREAD_SECONDS: f64 = 1.5;
+/// Secondes sans coup échangé avec un monstre : le pack de trash est terminé.
+const TRASH_IDLE: f64 = 8.0;
 /// Largeur des tranches de la courbe des dégâts et des soins, en secondes.
 const BUCKET: f64 = 5.0;
 /// Sorts lancés gardés au plus par combat (un raid de 40 sur dix minutes en lance moins).
@@ -47,6 +49,32 @@ pub struct Encounter {
     pub players: Vec<PlayerStats>,
     pub deaths: Vec<Death>,
     pub detail: Detail,
+    /// Pack de monstres hors combat de boss, dans une instance (1.4.0).
+    pub trash: bool,
+    /// Les monstres du combat, par nom : combien, tués, dégâts reçus et infligés (1.4.0).
+    pub enemies: Vec<Enemy>,
+}
+
+/// Monstres d'un même nom pendant un combat.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Enemy {
+    pub name: String,
+    pub count: u32,
+    pub killed: u32,
+    /// Dégâts que le groupe leur a infligés.
+    pub damage_taken: u64,
+    /// Dégâts qu'ils ont infligés au groupe.
+    pub damage_done: u64,
+}
+
+/// Un monstre pendant le combat, en cours de lecture.
+#[derive(Default)]
+struct EnemyTrack {
+    name: String,
+    taken: u64,
+    done: u64,
+    died: bool,
 }
 
 /// Le détail du combat : sorts de chaque joueur, courbe, et sorts lancés dans l'ordre.
@@ -240,9 +268,36 @@ struct Fight {
     health: HashMap<String, (u64, u64, f64)>,
     /// Sorts ennemis reçus par le groupe ces dernières secondes : moment, sort, joueur touché.
     spread: VecDeque<(f64, i64, String)>,
+    /// Monstres touchés ou qui ont touché le groupe.
+    enemies: HashMap<String, EnemyTrack>,
+    /// Dernier coup échangé avec un monstre (heure du journal).
+    last: f64,
+    trash: bool,
 }
 
 impl Fight {
+    fn new(id: i64, name: String, difficulty: i64, group_size: i64, start: f64, trash: bool) -> Fight {
+        Fight {
+            id,
+            name,
+            difficulty,
+            group_size,
+            start,
+            players: HashMap::new(),
+            recent: HashMap::new(),
+            deaths: Vec::new(),
+            tallies: HashMap::new(),
+            casts: Vec::new(),
+            taken: HashMap::new(),
+            recap: HashMap::new(),
+            health: HashMap::new(),
+            spread: VecDeque::new(),
+            enemies: HashMap::new(),
+            last: start,
+            trash,
+        }
+    }
+
     fn hp(&self, guid: &str, at: f64) -> Option<u8> {
         self.health
             .get(guid)
@@ -268,6 +323,12 @@ fn amount_at(f: &[String], back: usize) -> u64 {
 #[derive(Default)]
 pub struct Parser {
     fight: Option<Fight>,
+    /// Pack de trash en cours (dans une instance, hors combat de boss).
+    trash: Option<Fight>,
+    /// Dans une instance (donjon, raid) : le trash y est relevé.
+    instance: bool,
+    /// Combats terminés pas encore rendus (un pack de trash se termine avec la ligne suivante).
+    ready: VecDeque<Encounter>,
     zone: Option<String>,
     /// Familier → joueur.
     pets: HashMap<String, String>,
@@ -345,32 +406,55 @@ fn num(field: Option<&String>) -> u64 {
 }
 
 impl Parser {
-    /// Lit une ligne du journal ; renvoie le combat qu'elle termine, le cas échéant.
+    /// Lit une ligne du journal ; renvoie un combat terminé (boss ou pack de trash), le cas échéant.
     pub fn feed(&mut self, line: &str) -> Option<Encounter> {
+        if let Some(done) = self.step(line) {
+            self.ready.push_back(done);
+        }
+        self.ready.pop_front()
+    }
+
+    /// Fin du journal (ou plus rien d'écrit) : le pack de trash en cours est terminé.
+    pub fn flush(&mut self) -> Vec<Encounter> {
+        self.close_trash();
+        self.ready.drain(..).collect()
+    }
+
+    fn close_trash(&mut self) {
+        if let Some(fight) = self.trash.take() {
+            let end = fight.last;
+            if let Some(done) = self.close(fight, end, None) {
+                self.ready.push_back(done);
+            }
+        }
+    }
+
+    fn step(&mut self, line: &str) -> Option<Encounter> {
         let (time, payload) = line.split_once("  ")?;
         let at = timestamp(time)?;
-        let mut f = split(payload.trim_end());
+        let f = split(payload.trim_end());
         let event = f[0].clone();
+        if self.trash.as_ref().is_some_and(|t| at - t.last > TRASH_IDLE) {
+            self.close_trash();
+        }
 
         match event.as_str() {
-            "ZONE_CHANGE" => self.zone = f.get(2).cloned(),
+            "ZONE_CHANGE" => {
+                self.close_trash();
+                self.zone = f.get(2).cloned();
+                // Numéro d'instance : 0 hors des donjons et des raids.
+                self.instance = f.get(1).is_some_and(|id| id != "0");
+            }
             "ENCOUNTER_START" => {
-                self.fight = Some(Fight {
-                    id: f.get(1)?.parse().ok()?,
-                    name: f.get(2)?.clone(),
-                    difficulty: f.get(3).and_then(|v| v.parse().ok()).unwrap_or(0),
-                    group_size: f.get(4).and_then(|v| v.parse().ok()).unwrap_or(0),
-                    start: at,
-                    players: HashMap::new(),
-                    recent: HashMap::new(),
-                    deaths: Vec::new(),
-                    tallies: HashMap::new(),
-                    casts: Vec::new(),
-                    taken: HashMap::new(),
-                    recap: HashMap::new(),
-                    health: HashMap::new(),
-                    spread: VecDeque::new(),
-                });
+                self.close_trash();
+                self.fight = Some(Fight::new(
+                    f.get(1)?.parse().ok()?,
+                    f.get(2)?.clone(),
+                    f.get(3).and_then(|v| v.parse().ok()).unwrap_or(0),
+                    f.get(4).and_then(|v| v.parse().ok()).unwrap_or(0),
+                    at,
+                    false,
+                ));
             }
             "ENCOUNTER_END" => {
                 let id: i64 = f.get(1)?.parse().ok()?;
@@ -379,50 +463,95 @@ impl Parser {
                 }
                 let fight = self.fight.take()?;
                 let success = f.get(5).map(|v| v == "1").unwrap_or(false);
-                let name_of = |guid: &String, known: &str| {
-                    if known.is_empty() { self.names.get(guid).cloned().unwrap_or_else(|| "Inconnu".into()) } else { known.to_string() }
-                };
-                let mut details: Vec<PlayerDetail> = fight
-                    .tallies
-                    .into_iter()
-                    .map(|(guid, t)| {
-                        let mut spells: Vec<SpellStats> = t.spells.into_values().collect();
-                        spells.sort_by(|a, b| b.amount.cmp(&a.amount));
-                        let known = fight.players.get(&guid).map(|p| p.name.clone()).unwrap_or_default();
-                        PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing, taken: t.taken }
-                    })
-                    .collect();
-                details.sort_by_key(|d| std::cmp::Reverse(d.damage.iter().sum::<u64>()));
-                let mut taken: Vec<Taken> = fight.taken.into_values().collect();
-                taken.sort_by(|a, b| b.amount.cmp(&a.amount));
-                let mut players: Vec<PlayerStats> = fight
-                    .players
-                    .into_iter()
-                    .map(|(guid, mut p)| {
-                        if p.name.is_empty() {
-                            p.name = self.names.get(&guid).cloned().unwrap_or_else(|| "Inconnu".into());
-                        }
-                        p
-                    })
-                    .collect();
-                players.sort_by(|a, b| b.damage.cmp(&a.damage).then(b.healing.cmp(&a.healing)));
-                return Some(Encounter {
-                    encounter_id: fight.id,
-                    name: fight.name,
-                    zone: self.zone.clone(),
-                    difficulty: fight.difficulty,
-                    group_size: fight.group_size,
-                    started_at: fight.start as i64,
-                    duration: ((at - fight.start) * 10.0).round() / 10.0,
-                    success,
-                    players,
-                    deaths: fight.deaths,
-                    detail: Detail { bucket: BUCKET, players: details, casts: fight.casts, taken },
-                });
+                return self.close(fight, at, Some(success));
             }
             _ => {}
         }
+        self.track(at, f, &event)
+    }
 
+    /// Résumé d'un combat terminé. `success` : issue du boss ; None pour un pack de trash (réussi si
+    /// tous ses monstres sont morts, gardé seulement si l'un est mort ou un joueur).
+    fn close(&self, fight: Fight, end: f64, success: Option<bool>) -> Option<Encounter> {
+        let mut enemies: Vec<Enemy> = Vec::new();
+        for track in fight.enemies.values() {
+            let name = if track.name.is_empty() { "Inconnu".to_string() } else { track.name.clone() };
+            let i = match enemies.iter().position(|e| e.name == name) {
+                Some(i) => i,
+                None => {
+                    enemies.push(Enemy { name, ..Default::default() });
+                    enemies.len() - 1
+                }
+            };
+            let e = &mut enemies[i];
+            e.count += 1;
+            e.killed += track.died as u32;
+            e.damage_taken += track.taken;
+            e.damage_done += track.done;
+        }
+        enemies.sort_by(|a, b| b.damage_taken.cmp(&a.damage_taken).then(a.name.cmp(&b.name)));
+        let (name, success) = match success {
+            Some(success) => (fight.name.clone(), success),
+            None => {
+                let killed = enemies.iter().map(|e| e.killed).sum::<u32>();
+                if killed == 0 && fight.deaths.is_empty() {
+                    return None;
+                }
+                let top = enemies.first()?;
+                let mut name = if top.count > 1 { format!("{} ×{}", top.name, top.count) } else { top.name.clone() };
+                if enemies.len() > 1 {
+                    name.push_str(&format!(" + {}", enemies[1..].iter().map(|e| e.count).sum::<u32>()));
+                }
+                (name, enemies.iter().all(|e| e.killed == e.count))
+            }
+        };
+        let name_of = |guid: &String, known: &str| {
+            if known.is_empty() { self.names.get(guid).cloned().unwrap_or_else(|| "Inconnu".into()) } else { known.to_string() }
+        };
+        let mut details: Vec<PlayerDetail> = fight
+            .tallies
+            .into_iter()
+            .map(|(guid, t)| {
+                let mut spells: Vec<SpellStats> = t.spells.into_values().collect();
+                spells.sort_by(|a, b| b.amount.cmp(&a.amount));
+                let known = fight.players.get(&guid).map(|p| p.name.clone()).unwrap_or_default();
+                PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing, taken: t.taken }
+            })
+            .collect();
+        details.sort_by_key(|d| std::cmp::Reverse(d.damage.iter().sum::<u64>()));
+        let mut taken: Vec<Taken> = fight.taken.into_values().collect();
+        taken.sort_by(|a, b| b.amount.cmp(&a.amount));
+        let mut players: Vec<PlayerStats> = fight
+            .players
+            .into_iter()
+            .map(|(guid, mut p)| {
+                if p.name.is_empty() {
+                    p.name = self.names.get(&guid).cloned().unwrap_or_else(|| "Inconnu".into());
+                }
+                p
+            })
+            .collect();
+        players.sort_by(|a, b| b.damage.cmp(&a.damage).then(b.healing.cmp(&a.healing)));
+        let group_size = if fight.trash { players.len() as i64 } else { fight.group_size };
+        Some(Encounter {
+            encounter_id: fight.id,
+            name,
+            zone: self.zone.clone(),
+            difficulty: fight.difficulty,
+            group_size,
+            started_at: fight.start as i64,
+            duration: ((end - fight.start) * 10.0).round() / 10.0,
+            success,
+            players,
+            deaths: fight.deaths,
+            detail: Detail { bucket: BUCKET, players: details, casts: fight.casts, taken },
+            trash: fight.trash,
+            enemies,
+        })
+    }
+
+    /// Une ligne de combat : comptée au boss en cours, sinon au pack de trash (qu'elle ouvre au besoin).
+    fn track(&mut self, at: f64, mut f: Vec<String>, event: &str) -> Option<Encounter> {
         if f.len() < 9 {
             return None;
         }
@@ -450,7 +579,21 @@ impl Parser {
         }
 
         let pets = &self.pets;
-        let fight = self.fight.as_mut()?;
+        // Coup échangé entre le groupe (ou un familier) et un monstre : ouvre ou prolonge le pack de trash.
+        let damage = matches!(event, "SWING_DAMAGE" | "SPELL_DAMAGE" | "SPELL_PERIODIC_DAMAGE" | "RANGE_DAMAGE" | "DAMAGE_SHIELD" | "DAMAGE_SPLIT");
+        let ours = |guid: &str, flags: &str| (is_player(guid) || pets.contains_key(guid)) && grouped(flags);
+        let enemy = |guid: &str, flags: &str| !is_player(guid) && !pets.contains_key(guid) && hostile(flags);
+        let engaged = damage && ((ours(src, src_flags) && enemy(dst, dst_flags)) || (enemy(src, src_flags) && ours(dst, dst_flags)));
+        if self.fight.is_none() && self.trash.is_none() && engaged && self.instance {
+            self.trash = Some(Fight::new(0, String::new(), 0, 0, at, true));
+        }
+        let fight = match self.fight.as_mut() {
+            Some(fight) => fight,
+            None => self.trash.as_mut()?,
+        };
+        if engaged {
+            fight.last = at;
+        }
         let elapsed = ((at - fight.start) * 10.0).round() / 10.0;
         // Journal avancé : points de vie de celui qui agit (actuels, maximum).
         if let (Some(info), Some(cur), Some(max)) = (f.get(advanced), f.get(advanced + 2), f.get(advanced + 3)) {
@@ -471,10 +614,14 @@ impl Parser {
             pets.get(guid).filter(|_| grouped(flags)).map(|owner| (owner.clone(), String::new()))
         };
 
-        match event.as_str() {
+        match event {
             "SWING_DAMAGE" | "SPELL_DAMAGE" | "SPELL_PERIODIC_DAMAGE" | "RANGE_DAMAGE" | "DAMAGE_SHIELD" | "DAMAGE_SPLIT" => {
                 let amount = num(f.get(f.len().checked_sub(10)?));
                 if !is_player(dst) {
+                    if credited(src, src_name, src_flags).is_some() && enemy(dst, dst_flags) {
+                        let track = fight.enemies.entry(dst.clone()).or_insert_with(|| EnemyTrack { name: short(dst_name), ..Default::default() });
+                        track.taken += amount;
+                    }
                     if let Some((guid, name)) = credited(src, src_name, src_flags) {
                         stats(&mut fight.players, guid.clone(), name).damage += amount;
                         let spell = if event == "SWING_DAMAGE" { (0, "Mêlée".to_string()) } else { spell_of(&f) };
@@ -482,6 +629,10 @@ impl Parser {
                         fight.tallies.entry(guid).or_default().add(elapsed, spell, false, !is_player(src), amount, 0, critical);
                     }
                 } else if grouped(dst_flags) {
+                    if enemy(src, src_flags) {
+                        let track = fight.enemies.entry(src.clone()).or_insert_with(|| EnemyTrack { name: short(src_name), ..Default::default() });
+                        track.done += amount;
+                    }
                     stats(&mut fight.players, dst.clone(), short(dst_name)).damage_taken += amount;
                     let (id, spell) = if event == "SWING_DAMAGE" { (0, "Mêlée".to_string()) } else { spell_of(&f) };
                     slot(&mut fight.tallies.entry(dst.clone()).or_default().taken, elapsed, amount);
@@ -576,6 +727,11 @@ impl Parser {
                     let target = if dst_name == "nil" { String::new() } else { short(dst_name) };
                     let school = f.get(11).and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
                     fight.casts.push(Cast { at: elapsed, source: short(src_name), spell_id, spell, target, hostile: enemy, start: event == "SPELL_CAST_START", school });
+                }
+            }
+            "UNIT_DIED" if !is_player(dst) => {
+                if let Some(track) = fight.enemies.get_mut(dst.as_str()) {
+                    track.died = true;
                 }
             }
             "UNIT_DIED" if is_player(dst) && grouped(dst_flags) => {
@@ -679,6 +835,7 @@ pub fn read_all(path: &Path) -> Result<Vec<Encounter>, String> {
             Err(e) => return Err(format!("Journal illisible : {e}")),
         }
     }
+    found.extend(parser.flush());
     Ok(found)
 }
 
@@ -686,7 +843,7 @@ pub fn read_all(path: &Path) -> Result<Vec<Encounter>, String> {
 pub fn send_file(site: &str, token: &str, path: &Path) -> Result<String, String> {
     let encounters = read_all(path)?;
     if encounters.is_empty() {
-        return Ok("Aucun combat de boss dans ce journal.".into());
+        return Ok("Aucun combat dans ce journal.".into());
     }
     let (mut created, mut known) = (0, 0);
     for encounter in &encounters {
@@ -695,10 +852,13 @@ pub fn send_file(site: &str, token: &str, path: &Path) -> Result<String, String>
             _ => known += 1,
         }
     }
+    let trash = encounters.iter().filter(|e| e.trash).count();
     Ok(format!(
-        "{} combat{} de boss dans ce journal : {} envoyé{}{}.",
+        "{} combat{} dans ce journal ({} de boss, {} de trash) : {} envoyé{}{}.",
         encounters.len(),
         if encounters.len() > 1 { "s" } else { "" },
+        encounters.len() - trash,
+        trash,
         created,
         if created > 1 { "s" } else { "" },
         if known > 0 { format!(", {known} déjà sur le site") } else { String::new() }
@@ -710,6 +870,8 @@ struct Reader {
     offset: u64,
     rest: String,
     parser: Parser,
+    /// Lectures de suite sans rien de nouveau.
+    idle: u32,
 }
 
 impl Reader {
@@ -733,7 +895,18 @@ impl Reader {
         // La dernière ligne peut être en cours d'écriture : gardée pour la prochaine fois.
         let complete = text.rfind('\n').map_or(0, |i| i + 1);
         self.rest = text[complete..].to_string();
-        text[..complete].lines().filter_map(|line| self.parser.feed(line)).collect()
+        let mut done: Vec<Encounter> = text[..complete].lines().filter_map(|line| self.parser.feed(line)).collect();
+        done.extend(self.parser.ready.drain(..));
+        // Plus rien d'écrit depuis 15 s : le pack de trash en cours est fini.
+        if complete == 0 {
+            self.idle += 1;
+            if self.idle >= 3 {
+                done.extend(self.parser.flush());
+            }
+        } else {
+            self.idle = 0;
+        }
+        done
     }
 }
 
@@ -780,7 +953,7 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
             }
             let Some(path) = newest(Path::new(&settings.saved_variables)) else { continue };
             if reader.as_ref().map_or(true, |r| r.path != path) {
-                reader = Some(Reader { path, offset: 0, rest: String::new(), parser: Parser::default() });
+                reader = Some(Reader { path, offset: 0, rest: String::new(), parser: Parser::default(), idle: 0 });
             }
             pending.extend(reader.as_mut().unwrap().read());
 
@@ -791,7 +964,8 @@ pub fn watch(app: AppHandle, state: Shared, config_dir: PathBuf) {
                         at: chrono::Utc::now().timestamp(),
                         ok: true,
                         message: format!(
-                            "Combat envoyé : {} ({}, {} s){}.",
+                            "{} envoyé : {} ({}, {} s){}.",
+                            if encounter.trash { "Trash" } else { "Combat" },
                             encounter.name,
                             if encounter.success { "tué" } else { "essai" },
                             encounter.duration.round(),
@@ -884,6 +1058,35 @@ mod tests {
 10/9/2026 07:53:50.1000  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Player-4620-01548E6A,"Soin-ClassicBetaPvE2-",0x512,0x80000000,0
 10/9/2026 07:54:12.0000  ENCOUNTER_END,1144,"Grub",1,5,1,60000"#;
 
+    // Trash dans une instance : un pack se termine après 8 s sans coup échangé avec un monstre.
+    const TRASH: &str = r#"10/9/2026 07:59:59.0000  ZONE_CHANGE,36,"Les Mortemines",1
+10/9/2026 08:00:00.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,500,500,-1,1,0,0,0,nil,nil,nil
+10/9/2026 08:00:01.0000  SWING_DAMAGE,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000AA,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,40,40,-1,1,0,0,0,nil,nil,nil
+10/9/2026 08:00:02.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000BB,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,300,300,-1,1,0,0,0,nil,nil,nil
+10/9/2026 08:00:03.0000  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,0
+10/9/2026 08:00:20.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-101-00000000CC,"Rat",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,10,10,-1,1,0,0,0,nil,nil,nil
+10/9/2026 08:00:21.0000  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-1-0-1-101-00000000CC,"Rat",0xa48,0x80000000,0"#;
+
+    #[test]
+    fn decoupe_le_trash_en_packs() {
+        let mut parser = Parser::default();
+        let mut found: Vec<Encounter> = TRASH.lines().filter_map(|l| parser.feed(l)).collect();
+        found.extend(parser.flush());
+        assert_eq!(found.len(), 2);
+        let first = &found[0];
+        assert!(first.trash);
+        assert_eq!((first.encounter_id, first.name.as_str(), first.success, first.duration, first.group_size), (0, "Gardien ×2", false, 2.0, 1));
+        assert_eq!(first.zone.as_deref(), Some("Les Mortemines"));
+        assert_eq!(first.enemies, vec![Enemy { name: "Gardien".into(), count: 2, killed: 1, damage_taken: 800, damage_done: 40 }]);
+        assert_eq!(first.players[0].damage, 800);
+        assert_eq!((found[1].name.as_str(), found[1].success), ("Rat", true));
+
+        // Hors instance (Les Paluns) : pas de trash.
+        let mut outside = Parser::default();
+        let none: Vec<Encounter> = TRASH.replace("ZONE_CHANGE,36,", "ZONE_CHANGE,0,").lines().filter_map(|l| outside.feed(l)).collect();
+        assert!(none.is_empty() && outside.flush().is_empty());
+    }
+
     #[test]
     fn resume_un_combat_de_boss() {
         let mut parser = Parser::default();
@@ -913,6 +1116,10 @@ mod tests {
         assert_eq!((recap[0].amount, recap[0].overheal, recap[0].hp), (100, 20, Some(93)));
         assert_eq!((recap[1].spell.as_str(), recap[1].amount, recap[1].overkill, recap[1].school, recap[1].aoe), ("Morsure", 900, 37, 1, 1));
         assert_eq!(e.deaths[0].max_hp, Some(863));
+        // Monstres du combat : le Rampant a frappé le groupe, le crocilisque a été frappé (familier compris).
+        assert!(!e.trash);
+        assert!(e.enemies.iter().any(|m| m.name == "Rampant des tourbières" && m.damage_done == 940));
+        assert!(e.enemies.iter().any(|m| m.name == "Jeune crocilisque des Paluns" && m.damage_taken == 176));
 
         // Détail : sorts de chaque joueur, avec les critiques, courbe par tranches de 5 s, sorts lancés.
         let detail = |name: &str| e.detail.players.iter().find(|p| p.name == name).cloned().unwrap();
