@@ -777,11 +777,14 @@ impl Parser {
                 if let Some((x, y)) = position(&f, advanced) {
                     let hp = life.map_or(-1, |(cur, max)| pct(cur, max) as i16);
                     let second = elapsed.floor() as f32;
-                    let unit = fight.replay.entry(guid.clone()).or_insert_with(|| (short(name), player, Vec::new()));
-                    match unit.2.last_mut() {
-                        Some(last) if last.0 == second => *last = (second, x, y, hp),
-                        _ if unit.2.len() < REPLAY_POINTS => unit.2.push((second, x, y, hp)),
-                        _ => {}
+                    let points = &mut fight.replay.entry(guid.clone()).or_insert_with(|| (short(name), player, Vec::new())).2;
+                    // Plusieurs relevés dans la même seconde : le dernier compte.
+                    if points.last().is_some_and(|last| last.0 == second) {
+                        if let Some(last) = points.last_mut() {
+                            *last = (second, x, y, hp);
+                        }
+                    } else if points.len() < REPLAY_POINTS {
+                        points.push((second, x, y, hp));
                     }
                 }
             }
@@ -1297,7 +1300,7 @@ mod tests {
         assert!(first.trash);
         assert_eq!((first.encounter_id, first.name.as_str(), first.success, first.duration, first.group_size), (0, "Gardien ×2", false, 2.0, 1));
         assert_eq!(first.zone.as_deref(), Some("Les Mortemines"));
-        assert_eq!(first.enemies, vec![Enemy { name: "Gardien".into(), count: 2, killed: 1, damage_taken: 800, damage_done: 40 }]);
+        assert_eq!(first.enemies, vec![Enemy { name: "Gardien".into(), count: 2, killed: 1, damage_taken: 800, damage_done: 40, max_hp: 863, hp_end: Some(89), hp_min: Some(89) }]);
         assert_eq!(first.players[0].damage, 800);
         assert_eq!((found[1].name.as_str(), found[1].success), ("Rat", true));
         // Interruption d'un sort ennemi ; pas de courbe de boss pour le trash.

@@ -43,7 +43,7 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   Envois groupés (1.5.0) : les packs de trash attendent le boss suivant (3 minutes au plus) et partent
   avec lui en un seul envoi (`POST /api/desktop/encounters/batch`, 40 combats et 3 Mo au plus) ;
   « trop de demandes » ou site injoignable : rien n'est perdu, l'envoi est retenté.
-  Analyse des wipes et combat rejoué (1.6.0) : d'après le journal avancé, la vie de chaque monstre
+  Analyse des wipes et combat rejoué (1.6.1) : d'après le journal avancé, la vie de chaque monstre
   (courbe du boss par tranche, vie au wipe), le mana des joueurs par tranche, les interruptions et
   dissipations, les joueurs touchés par chaque sort, et la position et la vie de chaque unité une
   fois par seconde (le site rejoue le combat vu de dessus).
