@@ -33,6 +33,10 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   (dégâts, soins, coups, critiques), courbe par tranches de 5 s, sorts lancés par les joueurs, le
   boss et ses adds ; renvoyer un ancien journal complète un combat déjà sur le site. Dégâts subis par
   sort et courbe des dégâts subis (0.12.1). École de magie de chaque sort lancé (0.12.2), pour la frise.
+  Récit de chaque mort (1.3.0) : les 15 dernières secondes du joueur (coups reçus avec école,
+  surplus, part résistée, bloquée ou absorbée ; soins reçus et soins perdus ; effets posés par les
+  ennemis ; points de vie lus dans le journal avancé ; joueurs touchés par le même sort), que le site
+  analyse pour en donner la cause.
 - Page Personnages (0.13.0) : les personnages du compte sur le site, et le choix du préféré
   (`/api/desktop/me`, `PUT /api/desktop/characters/{id}/main`).
 - Évènements à inviter (1.2.0) : au démarrage puis toutes les 5 minutes, les évènements Discord à

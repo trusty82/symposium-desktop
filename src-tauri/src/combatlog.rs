@@ -19,6 +19,14 @@ use tauri_plugin_notification::NotificationExt;
 
 /// Derniers coups reçus gardés pour expliquer une mort.
 const RECAP: usize = 5;
+/// Secondes gardées avant une mort pour la raconter : coups, soins reçus, effets ennemis.
+const RECAP_SECONDS: f64 = 15.0;
+/// Lignes gardées au plus dans ce récit.
+const RECAP_MAX: usize = 60;
+/// Points de vie relevés il y a plus longtemps que ça : trop vieux pour être montrés.
+const HEALTH_FRESH: f64 = 3.0;
+/// Fenêtre pour compter les joueurs touchés par le même sort (capacité de zone).
+const SPREAD_SECONDS: f64 = 1.5;
 /// Largeur des tranches de la courbe des dégâts et des soins, en secondes.
 const BUCKET: f64 = 5.0;
 /// Sorts lancés gardés au plus par combat (un raid de 40 sur dix minutes en lance moins).
@@ -166,6 +174,52 @@ pub struct Death {
     pub name: String,
     pub at: f64,
     pub hits: Vec<Hit>,
+    /// Les dernières secondes du joueur, dans l'ordre : coups, soins reçus, effets ennemis.
+    pub recap: Vec<RecapEvent>,
+    /// Points de vie maximum, quand le journal avancé les a donnés.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_hp: Option<u64>,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
+}
+
+/// Une ligne du récit d'une mort.
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecapEvent {
+    /// Secondes depuis le début du combat.
+    pub at: f64,
+    /// « damage », « heal », « debuff » (posé par un ennemi) ou « debuffEnd » (retiré).
+    pub kind: String,
+    pub source: String,
+    pub spell: String,
+    pub spell_id: i64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub amount: u64,
+    /// Dégâts au-delà des points de vie restants (le coup fatal).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub overkill: u64,
+    /// École du sort (1 physique, 2 sacré, 4 feu, 8 nature, 16 givre, 32 ombre, 64 arcane).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub school: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub resisted: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub blocked: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub absorbed: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub overheal: u64,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub crit: bool,
+    /// Points de vie du joueur à ce moment (en %), d'après sa dernière action relevée.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp: Option<u8>,
+    /// Joueurs du groupe touchés par ce même sort au même moment (capacité de zone).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub aoe: u64,
 }
 
 struct Fight {
@@ -180,6 +234,35 @@ struct Fight {
     tallies: HashMap<String, Tally>,
     casts: Vec<Cast>,
     taken: HashMap<(i64, String), Taken>,
+    /// Récit en cours de chaque joueur (fenêtre glissante).
+    recap: HashMap<String, VecDeque<RecapEvent>>,
+    /// Derniers points de vie relevés de chaque joueur : actuels, maximum, moment.
+    health: HashMap<String, (u64, u64, f64)>,
+    /// Sorts ennemis reçus par le groupe ces dernières secondes : moment, sort, joueur touché.
+    spread: VecDeque<(f64, i64, String)>,
+}
+
+impl Fight {
+    fn hp(&self, guid: &str, at: f64) -> Option<u8> {
+        self.health
+            .get(guid)
+            .filter(|(_, max, seen)| *max > 0 && at - seen <= HEALTH_FRESH)
+            .map(|(cur, max, _)| ((*cur as f64 / *max as f64) * 100.0).round().min(100.0) as u8)
+    }
+
+    fn remember(&mut self, guid: &str, event: RecapEvent) {
+        let line = self.recap.entry(guid.to_string()).or_default();
+        let at = event.at;
+        line.push_back(event);
+        while line.front().is_some_and(|e| e.at < at - RECAP_SECONDS) || line.len() > RECAP_MAX {
+            line.pop_front();
+        }
+    }
+}
+
+/// Nombre du journal, -1 (« rien ») compté zéro.
+fn amount_at(f: &[String], back: usize) -> u64 {
+    f.len().checked_sub(back).and_then(|i| f.get(i)).and_then(|v| v.parse::<i64>().ok()).filter(|v| *v > 0).map_or(0, |v| v as u64)
 }
 
 #[derive(Default)]
@@ -284,6 +367,9 @@ impl Parser {
                     tallies: HashMap::new(),
                     casts: Vec::new(),
                     taken: HashMap::new(),
+                    recap: HashMap::new(),
+                    health: HashMap::new(),
+                    spread: VecDeque::new(),
                 });
             }
             "ENCOUNTER_END" => {
@@ -366,6 +452,16 @@ impl Parser {
         let pets = &self.pets;
         let fight = self.fight.as_mut()?;
         let elapsed = ((at - fight.start) * 10.0).round() / 10.0;
+        // Journal avancé : points de vie de celui qui agit (actuels, maximum).
+        if let (Some(info), Some(cur), Some(max)) = (f.get(advanced), f.get(advanced + 2), f.get(advanced + 3)) {
+            if info == src && is_player(src) {
+                if let (Ok(cur), Ok(max)) = (cur.parse::<u64>(), max.parse::<u64>()) {
+                    if max > 0 {
+                        fight.health.insert(src.clone(), (cur, max, elapsed));
+                    }
+                }
+            }
+        }
         // Joueur à créditer : lui-même, ou le maître du familier.
         let credited = |guid: &str, name: &str, flags: &str| -> Option<(String, String)> {
             if is_player(guid) {
@@ -393,9 +489,33 @@ impl Parser {
                     by.amount += amount;
                     by.hits += 1;
                     let recent = fight.recent.entry(dst.clone()).or_default();
-                    recent.push_back(Hit { at: elapsed, source: short(src_name), spell, amount });
+                    recent.push_back(Hit { at: elapsed, source: short(src_name), spell: spell.clone(), amount });
                     if recent.len() > RECAP {
                         recent.pop_front();
+                    }
+                    // Fin des dégâts : montant, de base, surplus, école, résisté, bloqué, absorbé, critique…
+                    let hp = fight.hp(dst, elapsed);
+                    fight.remember(dst, RecapEvent {
+                        at: elapsed,
+                        kind: "damage".into(),
+                        source: short(src_name),
+                        spell,
+                        spell_id: id,
+                        amount,
+                        overkill: amount_at(&f, 8),
+                        school: amount_at(&f, 7),
+                        resisted: amount_at(&f, 6),
+                        blocked: amount_at(&f, 5),
+                        absorbed: amount_at(&f, 4),
+                        crit: crit(f.get(f.len() - 3)),
+                        hp,
+                        ..Default::default()
+                    });
+                    if id != 0 && !is_player(src) {
+                        fight.spread.push_back((elapsed, id, dst.clone()));
+                        while fight.spread.front().is_some_and(|(t, _, _)| *t < elapsed - 5.0) {
+                            fight.spread.pop_front();
+                        }
                     }
                 }
             }
@@ -409,6 +529,29 @@ impl Parser {
                     let critical = crit(f.last());
                     fight.tallies.entry(guid).or_default().add(elapsed, spell_of(&f), true, !is_player(src), amount.saturating_sub(over), over, critical);
                 }
+                if is_player(dst) && grouped(dst_flags) {
+                    let (spell_id, spell) = spell_of(&f);
+                    let hp = fight.hp(dst, elapsed);
+                    fight.remember(dst, RecapEvent {
+                        at: elapsed,
+                        kind: "heal".into(),
+                        source: short(src_name),
+                        spell,
+                        spell_id,
+                        amount: amount.saturating_sub(over),
+                        overheal: over,
+                        crit: crit(f.last()),
+                        hp,
+                        ..Default::default()
+                    });
+                }
+            }
+            "SPELL_AURA_APPLIED" | "SPELL_AURA_REMOVED"
+                if is_player(dst) && grouped(dst_flags) && !is_player(src) && !pets.contains_key(src) && f.get(12).is_some_and(|t| t == "DEBUFF") =>
+            {
+                let (spell_id, spell) = spell_of(&f);
+                let kind = if event == "SPELL_AURA_APPLIED" { "debuff" } else { "debuffEnd" };
+                fight.remember(dst, RecapEvent { at: elapsed, kind: kind.into(), source: short(src_name), spell, spell_id, ..Default::default() });
             }
             "SPELL_ABSORBED" => {
                 // … lanceur du bouclier (GUID, nom, drapeaux ×2), sort (×3), montant, montant de base, critique.
@@ -438,7 +581,20 @@ impl Parser {
             "UNIT_DIED" if is_player(dst) && grouped(dst_flags) => {
                 stats(&mut fight.players, dst.clone(), short(dst_name)).deaths += 1;
                 let hits = fight.recent.remove(dst).map(Vec::from).unwrap_or_default();
-                fight.deaths.push(Death { name: short(dst_name), at: elapsed, hits });
+                let mut recap: Vec<RecapEvent> = fight.recap.remove(dst).map(Vec::from).unwrap_or_default();
+                for e in recap.iter_mut().filter(|e| e.kind == "damage" && e.spell_id != 0) {
+                    let mut hit: Vec<&String> = fight
+                        .spread
+                        .iter()
+                        .filter(|(t, id, _)| *id == e.spell_id && (t - e.at).abs() <= SPREAD_SECONDS)
+                        .map(|(_, _, who)| who)
+                        .collect();
+                    hit.sort();
+                    hit.dedup();
+                    e.aoe = hit.len() as u64;
+                }
+                let max_hp = fight.health.get(dst).map(|(_, max, _)| *max);
+                fight.deaths.push(Death { name: short(dst_name), at: elapsed, hits, recap, max_hp });
             }
             _ => {}
         }
@@ -750,6 +906,13 @@ mod tests {
         assert_eq!(e.deaths.len(), 1);
         assert_eq!(e.deaths[0].hits.last().map(|h| (h.spell.as_str(), h.amount)), Some(("Morsure", 900)));
         assert_eq!(e.deaths[0].hits[0].spell, "Mêlée");
+        // Récit de la mort : les 15 dernières secondes (le coup de 18 s est trop ancien), soin reçu
+        // et coup fatal avec son surplus, points de vie lus dans le journal avancé.
+        let recap = &e.deaths[0].recap;
+        assert_eq!(recap.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>(), vec!["heal", "damage"]);
+        assert_eq!((recap[0].amount, recap[0].overheal, recap[0].hp), (100, 20, Some(93)));
+        assert_eq!((recap[1].spell.as_str(), recap[1].amount, recap[1].overkill, recap[1].school, recap[1].aoe), ("Morsure", 900, 37, 1, 1));
+        assert_eq!(e.deaths[0].max_hp, Some(863));
 
         // Détail : sorts de chaque joueur, avec les critiques, courbe par tranches de 5 s, sorts lancés.
         let detail = |name: &str| e.detail.players.iter().find(|p| p.name == name).cloned().unwrap();
