@@ -66,6 +66,14 @@ pub struct Enemy {
     pub damage_taken: u64,
     /// Dégâts qu'ils ont infligés au groupe.
     pub damage_done: u64,
+    /// Points de vie maximum du plus gros d'entre eux (journal avancé, 1.6.0).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub max_hp: u64,
+    /// Ses points de vie (en %) au dernier relevé, et au plus bas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_end: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_min: Option<u8>,
 }
 
 /// Un monstre pendant le combat, en cours de lecture.
@@ -75,6 +83,30 @@ struct EnemyTrack {
     taken: u64,
     done: u64,
     died: bool,
+    /// Points de vie au dernier relevé (actuels, maximum) et pourcentage le plus bas.
+    hp: Option<(u64, u64)>,
+    min_pct: Option<u8>,
+    /// Points de vie (en %) par tranche, pour la courbe du boss.
+    series: Vec<i16>,
+}
+
+fn pct(cur: u64, max: u64) -> u8 {
+    ((cur as f64 / max.max(1) as f64) * 100.0).round().min(100.0) as u8
+}
+
+/// Position du journal avancé (x, y) : le premier nombre à virgule après les points de vie.
+fn position(f: &[String], advanced: usize) -> Option<(f32, f32)> {
+    let x = (advanced + 4..f.len()).find(|&i| f[i].contains('.') && f[i].parse::<f64>().is_ok())?;
+    Some((f[x].parse().ok()?, f.get(x + 1)?.parse().ok()?))
+}
+
+/// Puissance du journal avancé (type, actuelle, maximum) : juste avant la position (le premier nombre à virgule).
+fn power(f: &[String], advanced: usize) -> Option<(i64, u64, u64)> {
+    let x = (advanced + 4..f.len()).find(|&i| f[i].contains('.') && f[i].parse::<f64>().is_ok())?;
+    let kind = f.get(x.checked_sub(4)?)?.parse().ok()?;
+    let cur = f.get(x - 3)?.parse().ok()?;
+    let max = f.get(x - 2)?.parse().ok()?;
+    Some((kind, cur, max))
 }
 
 /// Le détail du combat : sorts de chaque joueur, courbe, et sorts lancés dans l'ordre.
@@ -87,6 +119,40 @@ pub struct Detail {
     pub casts: Vec<Cast>,
     /// Dégâts subis par le groupe, par sort (0.12.1).
     pub taken: Vec<Taken>,
+    /// Points de vie du boss (en %) à la fin de chaque tranche, -1 inconnu (journal avancé, 1.6.0).
+    pub boss_hp: Vec<i16>,
+    /// Interruptions et dissipations des joueurs (1.6.0).
+    pub actions: Vec<Action>,
+    /// Position et points de vie de chaque unité, seconde par seconde, pour rejouer le combat (1.6.0).
+    pub replay: Vec<ReplayUnit>,
+}
+
+/// Une unité du combat rejoué : ses relevés [seconde, x, y, points de vie en % ou -1].
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayUnit {
+    pub name: String,
+    /// « player » ou « enemy ».
+    pub kind: String,
+    pub points: Vec<(f32, f32, f32, i16)>,
+}
+
+/// Monstres rejoués au plus (les plus frappés), et relevés au plus par unité.
+const REPLAY_ENEMIES: usize = 30;
+const REPLAY_POINTS: usize = 3600;
+
+/// Interruption d'un sort ennemi, ou dissipation d'un effet, par un joueur du groupe.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Action {
+    pub at: f64,
+    /// « interrupt » ou « dispel ».
+    pub kind: String,
+    pub source: String,
+    pub spell: String,
+    pub target: String,
+    /// Sort interrompu, ou effet dissipé.
+    pub what: String,
 }
 
 /// Ce qui a frappé le groupe : un sort (ou la mêlée) et qui l'a lancé.
@@ -99,6 +165,10 @@ pub struct Taken {
     pub source: String,
     pub amount: u64,
     pub hits: u32,
+    /// Joueurs différents touchés (1.6.0).
+    pub targets: u32,
+    #[serde(skip)]
+    hit: std::collections::HashSet<String>,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -110,6 +180,8 @@ pub struct PlayerDetail {
     pub damage: Vec<u64>,
     pub healing: Vec<u64>,
     pub taken: Vec<u64>,
+    /// Mana (en %) à la fin de chaque tranche, -1 inconnu (journal avancé, 1.6.0).
+    pub mana: Vec<i16>,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -152,6 +224,29 @@ struct Tally {
     damage: Vec<u64>,
     healing: Vec<u64>,
     taken: Vec<u64>,
+    mana: Vec<i16>,
+}
+
+/// Note un pourcentage dans la tranche du moment (le dernier relevé de la tranche compte).
+fn mark(series: &mut Vec<i16>, elapsed: f64, pct: i16) {
+    let i = (elapsed.max(0.0) / BUCKET) as usize;
+    if series.len() <= i {
+        series.resize(i + 1, -1);
+    }
+    series[i] = pct;
+}
+
+/// Tranches sans relevé : la valeur de la précédente.
+fn carry(mut series: Vec<i16>) -> Vec<i16> {
+    let mut last = -1;
+    for v in series.iter_mut() {
+        if *v < 0 {
+            *v = last;
+        } else {
+            last = *v;
+        }
+    }
+    series
 }
 
 /// Ajoute un montant à la tranche du moment.
@@ -273,7 +368,14 @@ struct Fight {
     /// Dernier coup échangé avec un monstre (heure du journal).
     last: f64,
     trash: bool,
+    /// Interruptions et dissipations des joueurs.
+    actions: Vec<Action>,
+    /// Positions relevées : joueur ou monstre → (nom, joueur ?, relevés).
+    replay: HashMap<String, (String, bool, Vec<(f32, f32, f32, i16)>)>,
 }
+
+/// Interruptions et dissipations gardées au plus par combat.
+const MAX_ACTIONS: usize = 2000;
 
 impl Fight {
     fn new(id: i64, name: String, difficulty: i64, group_size: i64, start: f64, trash: bool) -> Fight {
@@ -295,6 +397,8 @@ impl Fight {
             enemies: HashMap::new(),
             last: start,
             trash,
+            actions: Vec::new(),
+            replay: HashMap::new(),
         }
     }
 
@@ -493,6 +597,16 @@ impl Parser {
             e.killed += track.died as u32;
             e.damage_taken += track.taken;
             e.damage_done += track.done;
+            if let Some((cur, max)) = track.hp {
+                // Le plus gros monstre du nom donne les points de vie (le boss parmi ses adds homonymes).
+                if max >= e.max_hp {
+                    e.max_hp = max;
+                    e.hp_end = Some(pct(cur, max));
+                }
+            }
+            if let Some(m) = track.min_pct {
+                e.hp_min = Some(e.hp_min.map_or(m, |x| x.min(m)));
+            }
         }
         enemies.sort_by(|a, b| b.damage_taken.cmp(&a.damage_taken).then(a.name.cmp(&b.name)));
         let (name, success) = match success {
@@ -520,11 +634,30 @@ impl Parser {
                 let mut spells: Vec<SpellStats> = t.spells.into_values().collect();
                 spells.sort_by(|a, b| b.amount.cmp(&a.amount));
                 let known = fight.players.get(&guid).map(|p| p.name.clone()).unwrap_or_default();
-                PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing, taken: t.taken }
+                PlayerDetail { name: name_of(&guid, &known), spells, damage: t.damage, healing: t.healing, taken: t.taken, mana: carry(t.mana) }
             })
             .collect();
         details.sort_by_key(|d| std::cmp::Reverse(d.damage.iter().sum::<u64>()));
-        let mut taken: Vec<Taken> = fight.taken.into_values().collect();
+        // Combat rejoué : les joueurs, et les monstres les plus frappés.
+        let mut replay: Vec<ReplayUnit> = Vec::new();
+        let mut foes: Vec<(&String, &(String, bool, Vec<(f32, f32, f32, i16)>))> = fight.replay.iter().filter(|(_, u)| !u.1).collect();
+        foes.sort_by_key(|(guid, _)| std::cmp::Reverse(fight.enemies.get(*guid).map_or(0, |t| t.taken)));
+        for (_, (name, player, points)) in fight.replay.iter().filter(|(_, u)| u.1).chain(foes.into_iter().take(REPLAY_ENEMIES)) {
+            replay.push(ReplayUnit { name: name.clone(), kind: if *player { "player" } else { "enemy" }.into(), points: points.clone() });
+        }
+        // Courbe du boss : le monstre qui porte le nom du combat, sinon le plus gros (pas de boss pour le trash).
+        let boss_hp = if fight.trash {
+            Vec::new()
+        } else {
+            fight
+                .enemies
+                .values()
+                .filter(|t| t.hp.is_some())
+                .max_by_key(|t| (t.name == fight.name, t.hp.map_or(0, |(_, max)| max)))
+                .map(|t| carry(t.series.clone()))
+                .unwrap_or_default()
+        };
+        let mut taken: Vec<Taken> = fight.taken.into_values().map(|mut t| { t.targets = t.hit.len() as u32; t }).collect();
         taken.sort_by(|a, b| b.amount.cmp(&a.amount));
         let mut players: Vec<PlayerStats> = fight
             .players
@@ -549,7 +682,7 @@ impl Parser {
             success,
             players,
             deaths: fight.deaths,
-            detail: Detail { bucket: BUCKET, players: details, casts: fight.casts, taken },
+            detail: Detail { bucket: BUCKET, players: details, casts: fight.casts, taken, boss_hp, actions: fight.actions, replay },
             trash: fight.trash,
             enemies,
         })
@@ -601,12 +734,54 @@ impl Parser {
             fight.last = at;
         }
         let elapsed = ((at - fight.start) * 10.0).round() / 10.0;
-        // Journal avancé : points de vie de celui qui agit (actuels, maximum).
-        if let (Some(info), Some(cur), Some(max)) = (f.get(advanced), f.get(advanced + 2), f.get(advanced + 3)) {
-            if info == src && is_player(src) {
-                if let (Ok(cur), Ok(max)) = (cur.parse::<u64>(), max.parse::<u64>()) {
+        // Journal avancé : l'unité décrite (celle qui agit, ou la cible selon l'évènement) avec ses points
+        // de vie, sa puissance et sa position. Sert aux récits des morts, à la courbe du boss, au mana des
+        // soigneurs et au combat rejoué.
+        let subject = match f.get(advanced) {
+            Some(info) if info == src => Some((src, src_name, src_flags)),
+            Some(info) if info == dst => Some((dst, dst_name, dst_flags)),
+            _ => None,
+        };
+        if let Some((guid, name, flags)) = subject {
+            let player = is_player(guid) && grouped(flags);
+            let foe = enemy(guid, flags);
+            let life = match (f.get(advanced + 2).and_then(|v| v.parse::<u64>().ok()), f.get(advanced + 3).and_then(|v| v.parse::<u64>().ok())) {
+                (Some(cur), Some(max)) if max > 0 => Some((cur, max)),
+                _ => None,
+            };
+            if let Some((cur, max)) = life {
+                if is_player(guid) {
+                    fight.health.insert(guid.clone(), (cur, max, elapsed));
+                }
+                // Un monstre : ses points de vie (la courbe du boss, sa vie restante au wipe).
+                if foe {
+                    let track = fight.enemies.entry(guid.clone()).or_insert_with(|| EnemyTrack { name: short(name), ..Default::default() });
+                    let p = pct(cur, max);
+                    track.hp = Some((cur, max));
+                    track.min_pct = Some(track.min_pct.map_or(p, |m| m.min(p)));
+                    if !fight.trash {
+                        mark(&mut track.series, elapsed, p as i16);
+                    }
+                }
+            }
+            // Mana d'un joueur du groupe (puissance de type 0).
+            if player {
+                if let Some((0, cur, max)) = power(&f, advanced) {
                     if max > 0 {
-                        fight.health.insert(src.clone(), (cur, max, elapsed));
+                        mark(&mut fight.tallies.entry(guid.clone()).or_default().mana, elapsed, pct(cur, max) as i16);
+                    }
+                }
+            }
+            // Position, une fois par seconde : le combat rejoué.
+            if player || foe {
+                if let Some((x, y)) = position(&f, advanced) {
+                    let hp = life.map_or(-1, |(cur, max)| pct(cur, max) as i16);
+                    let second = elapsed.floor() as f32;
+                    let unit = fight.replay.entry(guid.clone()).or_insert_with(|| (short(name), player, Vec::new()));
+                    match unit.2.last_mut() {
+                        Some(last) if last.0 == second => *last = (second, x, y, hp),
+                        _ if unit.2.len() < REPLAY_POINTS => unit.2.push((second, x, y, hp)),
+                        _ => {}
                     }
                 }
             }
@@ -645,6 +820,7 @@ impl Parser {
                     let by = fight.taken.entry((id, spell.clone())).or_insert_with(|| Taken { id, name: spell.clone(), source: short(src_name), ..Default::default() });
                     by.amount += amount;
                     by.hits += 1;
+                    by.hit.insert(dst.clone());
                     let recent = fight.recent.entry(dst.clone()).or_default();
                     recent.push_back(Hit { at: elapsed, source: short(src_name), spell: spell.clone(), amount });
                     if recent.len() > RECAP {
@@ -734,6 +910,17 @@ impl Parser {
                     let school = f.get(11).and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
                     fight.casts.push(Cast { at: elapsed, source: short(src_name), spell_id, spell, target, hostile: enemy, start: event == "SPELL_CAST_START", school });
                 }
+            }
+            "SPELL_INTERRUPT" | "SPELL_DISPEL" if credited(src, src_name, src_flags).is_some() && fight.actions.len() < MAX_ACTIONS => {
+                // … sort du joueur (9-11), puis sort interrompu ou effet dissipé (12-14).
+                fight.actions.push(Action {
+                    at: elapsed,
+                    kind: if event == "SPELL_INTERRUPT" { "interrupt" } else { "dispel" }.into(),
+                    source: short(src_name),
+                    spell: f.get(10).cloned().unwrap_or_default(),
+                    target: if dst_name == "nil" { String::new() } else { short(dst_name) },
+                    what: f.get(13).cloned().unwrap_or_default(),
+                });
             }
             "UNIT_DIED" if !is_player(dst) => {
                 if let Some(track) = fight.enemies.get_mut(dst.as_str()) {
@@ -1094,6 +1281,7 @@ mod tests {
     const TRASH: &str = r#"10/9/2026 07:59:59.0000  ZONE_CHANGE,36,"Les Mortemines",1
 10/9/2026 08:00:00.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,500,500,-1,1,0,0,0,nil,nil,nil
 10/9/2026 08:00:01.0000  SWING_DAMAGE,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000AA,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,40,40,-1,1,0,0,0,nil,nil,nil
+10/9/2026 08:00:01.5000  SPELL_INTERRUPT,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,1766,"Coup de pied",0x1,2050,"Soins",2
 10/9/2026 08:00:02.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-100-00000000BB,"Gardien",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,300,300,-1,1,0,0,0,nil,nil,nil
 10/9/2026 08:00:03.0000  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-1-0-1-100-00000000AA,"Gardien",0xa48,0x80000000,0
 10/9/2026 08:00:20.0000  SWING_DAMAGE,Player-4620-008EF1C4,"Lame-X-",0x511,0x80000000,Creature-0-1-0-1-101-00000000CC,"Rat",0xa48,0x80000000,Player-4620-008EF1C4,0000000000000000,768,863,84,0,1002,0,0,0,1,0,0,0,-3116.69,-1677.83,1437,2.1961,24,10,10,-1,1,0,0,0,nil,nil,nil
@@ -1112,6 +1300,10 @@ mod tests {
         assert_eq!(first.enemies, vec![Enemy { name: "Gardien".into(), count: 2, killed: 1, damage_taken: 800, damage_done: 40 }]);
         assert_eq!(first.players[0].damage, 800);
         assert_eq!((found[1].name.as_str(), found[1].success), ("Rat", true));
+        // Interruption d'un sort ennemi ; pas de courbe de boss pour le trash.
+        let action = &first.detail.actions[0];
+        assert_eq!((action.kind.as_str(), action.source.as_str(), action.what.as_str(), action.target.as_str()), ("interrupt", "Lame", "Soins", "Gardien"));
+        assert!(first.detail.boss_hp.is_empty());
 
         // Hors instance (Les Paluns) : pas de trash.
         let mut outside = Parser::default();
@@ -1152,6 +1344,19 @@ mod tests {
         assert!(!e.trash);
         assert!(e.enemies.iter().any(|m| m.name == "Rampant des tourbières" && m.damage_done == 940));
         assert!(e.enemies.iter().any(|m| m.name == "Jeune crocilisque des Paluns" && m.damage_taken == 176));
+        // Points de vie du Rampant (journal avancé, quand il agit) : 768 sur 863, la courbe du « boss ».
+        let rampant = e.enemies.iter().find(|m| m.name == "Rampant des tourbières").unwrap();
+        assert_eq!((rampant.max_hp, rampant.hp_end, rampant.hp_min), (863, Some(89), Some(89)));
+        assert_eq!(e.detail.boss_hp.last(), Some(&89));
+        assert_eq!(e.detail.boss_hp.first(), Some(&-1));
+        // Joueurs touchés par chaque sort : la Morsure n'a touché que le soigneur.
+        assert_eq!(e.detail.taken.iter().find(|t| t.name == "Morsure").map(|t| t.targets), Some(1));
+        // Combat rejoué : Lame (joueur) et le Rampant (monstre) avec leurs positions, une fois par seconde.
+        let lame = e.detail.replay.iter().find(|u| u.name == "Lame").unwrap();
+        assert_eq!(lame.kind, "player");
+        assert_eq!(lame.points[0], (15.0, -3177.48, -1756.39, 87));
+        let rampant_path = e.detail.replay.iter().find(|u| u.name == "Rampant des tourbières").unwrap();
+        assert_eq!((rampant_path.kind.as_str(), rampant_path.points.len()), ("enemy", 2));
 
         // Détail : sorts de chaque joueur, avec les critiques, courbe par tranches de 5 s, sorts lancés.
         let detail = |name: &str| e.detail.players.iter().find(|p| p.name == name).cloned().unwrap();
