@@ -37,9 +37,9 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   surplus, part résistée, bloquée ou absorbée ; soins reçus et soins perdus ; effets posés par les
   ennemis ; points de vie lus dans le journal avancé ; joueurs touchés par le même sort), que le site
   analyse pour en donner la cause.
-  Trash (1.4.0) : dans une instance, chaque pack de monstres hors combat de boss (du premier coup
+  Trash (1.4.1) : dans une instance, chaque pack de monstres hors combat de boss (du premier coup
   échangé à 8 s sans combat) est résumé et envoyé comme un combat ; chaque combat, boss ou trash,
-  liste aussi ses monstres (combien, tués, dégâts reçus et infligés au groupe).
+  liste aussi ses monstres, hostiles ou neutres (combien, tués, dégâts reçus et infligés au groupe).
 - Page Personnages (0.13.0) : les personnages du compte sur le site, et le choix du préféré
   (`/api/desktop/me`, `PUT /api/desktop/characters/{id}/main`).
 - Évènements à inviter (1.2.0) : au démarrage puis toutes les 5 minutes, les évènements Discord à

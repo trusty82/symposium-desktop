@@ -388,6 +388,11 @@ fn timestamp(text: &str) -> Option<f64> {
 }
 
 /// Personnage hostile (le boss, ses adds).
+/// Réaction amicale (drapeau 0x10) : un allié, jamais un monstre.
+fn friendly(flags: &str) -> bool {
+    u32::from_str_radix(flags.trim_start_matches("0x"), 16).map_or(true, |f| f & 0x10 != 0)
+}
+
 fn hostile(flags: &str) -> bool {
     u32::from_str_radix(flags.trim_start_matches("0x"), 16).map_or(false, |f| f & 0x40 != 0)
 }
@@ -582,7 +587,8 @@ impl Parser {
         // Coup échangé entre le groupe (ou un familier) et un monstre : ouvre ou prolonge le pack de trash.
         let damage = matches!(event, "SWING_DAMAGE" | "SPELL_DAMAGE" | "SPELL_PERIODIC_DAMAGE" | "RANGE_DAMAGE" | "DAMAGE_SHIELD" | "DAMAGE_SPLIT");
         let ours = |guid: &str, flags: &str| (is_player(guid) || pets.contains_key(guid)) && grouped(flags);
-        let enemy = |guid: &str, flags: &str| !is_player(guid) && !pets.contains_key(guid) && hostile(flags);
+        // Monstre : ni joueur, ni familier, ni amical (les neutres attaqués comptent).
+        let enemy = |guid: &str, flags: &str| !is_player(guid) && !pets.contains_key(guid) && !friendly(flags);
         let engaged = damage && ((ours(src, src_flags) && enemy(dst, dst_flags)) || (enemy(src, src_flags) && ours(dst, dst_flags)));
         if self.fight.is_none() && self.trash.is_none() && engaged && self.instance {
             self.trash = Some(Fight::new(0, String::new(), 0, 0, at, true));
