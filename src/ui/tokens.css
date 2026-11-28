@@ -1,0 +1,65 @@
+/* Généré par tools/tokens/build.mjs depuis design/tokens.json : ne pas modifier à la main. */
+
+:root {
+    --bg: #f4f4f6;
+    --surface: #ffffff;
+    --surface-highlight: #ebebee;
+    --line: #d9d9de;
+    --text: #202124;
+    --text-muted: #4d4e54;
+    --text-dim: #6e6f76;
+    --steel: #6f7076;
+    --signal: #b8111c;
+    --signal-hover: #9c0e18;
+    --signal-ink: #a3101a;
+    --on-signal: #ffffff;
+    --ok: #1d7a43;
+    --warn: #8a5a00;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --text-size-base: 1rem;
+    --text-size-small: 0.875rem;
+    --text-size-h3: 1.125rem;
+    --text-size-h2: 1.5rem;
+    --text-size-h1: 2.25rem;
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        --bg: #1d1e21;
+        --surface: #26272b;
+        --surface-highlight: #303136;
+        --line: #3b3c42;
+        --text: #ededef;
+        --text-muted: #b4b5bb;
+        --text-dim: #85868d;
+        --steel: #9b9ca1;
+        --signal: #b8111c;
+        --signal-hover: #cf1824;
+        --signal-ink: #ff7a80;
+        --on-signal: #ffffff;
+        --ok: #6fcf8d;
+        --warn: #e8b75a;
+        color-scheme: dark;
+    }
+}
+
+:root[data-theme='dark'] {
+    --bg: #1d1e21;
+    --surface: #26272b;
+    --surface-highlight: #303136;
+    --line: #3b3c42;
+    --text: #ededef;
+    --text-muted: #b4b5bb;
+    --text-dim: #85868d;
+    --steel: #9b9ca1;
+    --signal: #b8111c;
+    --signal-hover: #cf1824;
+    --signal-ink: #ff7a80;
+    --on-signal: #ffffff;
+    --ok: #6fcf8d;
+    --warn: #e8b75a;
+    color-scheme: dark;
+}
