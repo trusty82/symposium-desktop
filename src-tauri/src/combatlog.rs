@@ -29,6 +29,8 @@ const HEALTH_FRESH: f64 = 3.0;
 const SPREAD_SECONDS: f64 = 1.5;
 /// Secondes sans coup échangé avec un monstre : le pack de trash est terminé.
 const TRASH_IDLE: f64 = 8.0;
+/// Relever le trash des instances (1.4 à 1.6). Coupé en 1.6.2 : seuls les combats de boss sont envoyés.
+const RECORD_TRASH: bool = false;
 /// Largeur des tranches de la courbe des dégâts et des soins, en secondes.
 const BUCKET: f64 = 5.0;
 /// Sorts lancés gardés au plus par combat (un raid de 40 sur dix minutes en lance moins).
@@ -723,7 +725,7 @@ impl Parser {
         // Monstre : ni joueur, ni familier, ni amical (les neutres attaqués comptent).
         let enemy = |guid: &str, flags: &str| !is_player(guid) && !pets.contains_key(guid) && !friendly(flags);
         let engaged = damage && ((ours(src, src_flags) && enemy(dst, dst_flags)) || (enemy(src, src_flags) && ours(dst, dst_flags)));
-        if self.fight.is_none() && self.trash.is_none() && engaged && self.instance {
+        if RECORD_TRASH && self.fight.is_none() && self.trash.is_none() && engaged && self.instance {
             self.trash = Some(Fight::new(0, String::new(), 0, 0, at, true));
         }
         let fight = match self.fight.as_mut() {
@@ -1291,6 +1293,16 @@ mod tests {
 10/9/2026 08:00:21.0000  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-1-0-1-101-00000000CC,"Rat",0xa48,0x80000000,0"#;
 
     #[test]
+    fn n_envoie_plus_le_trash() {
+        // 1.6.2 : seuls les combats de boss sont relevés, même dans une instance.
+        let mut parser = Parser::default();
+        let mut found: Vec<Encounter> = TRASH.lines().filter_map(|l| parser.feed(l)).collect();
+        found.extend(parser.flush());
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    #[ignore = "trash coupé en 1.6.2 (RECORD_TRASH)"]
     fn decoupe_le_trash_en_packs() {
         let mut parser = Parser::default();
         let mut found: Vec<Encounter> = TRASH.lines().filter_map(|l| parser.feed(l)).collect();

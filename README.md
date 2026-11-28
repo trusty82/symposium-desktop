@@ -37,7 +37,7 @@ Installeur Windows signé : voir la [politique de signature du code](CODE_SIGNIN
   surplus, part résistée, bloquée ou absorbée ; soins reçus et soins perdus ; effets posés par les
   ennemis ; points de vie lus dans le journal avancé ; joueurs touchés par le même sort), que le site
   analyse pour en donner la cause.
-  Trash (1.4.1) : dans une instance, chaque pack de monstres hors combat de boss (du premier coup
+  Trash (1.4.1 à 1.6.1, coupé en 1.6.2 : seuls les combats de boss sont envoyés) : dans une instance, chaque pack de monstres hors combat de boss (du premier coup
   échangé à 8 s sans combat) est résumé et envoyé comme un combat ; chaque combat, boss ou trash,
   liste aussi ses monstres, hostiles ou neutres (combien, tués, dégâts reçus et infligés au groupe).
   Envois groupés (1.5.0) : les packs de trash attendent le boss suivant (3 minutes au plus) et partent
